@@ -1,4 +1,4 @@
-{******************************************************************************}
+ï»¿{******************************************************************************}
 {                                                                              }
 {       Delphi cross platform socket library                                   }
 {                                                                              }
@@ -12,8 +12,14 @@ unit Utils.Utils;
 interface
 
 uses
-  System.SysUtils, System.Classes, System.Types, System.IOUtils,
-  System.Math, System.Diagnostics, System.TimeSpan, System.Character;
+  System.SysUtils,
+  System.Classes,
+  System.Types,
+  System.IOUtils,
+  System.Math,
+  System.Diagnostics,
+  System.TimeSpan,
+  System.Character;
 
 type
   TUtils = class
@@ -22,19 +28,19 @@ type
   private
     class constructor Create;
   public
-    class function CalcTickDiff(StartTick, EndTick: Cardinal): Cardinal;
-    class function TestTime(Proc: TProc): TTimeSpan;
+    class function CalcTickDiff(AStartTick, AEndTick: Cardinal): Cardinal;
+    class function TestTime(AProc: TProc): TTimeSpan;
     class function StrToDateTime(const S, Fmt: string): TDateTime; overload;
     class function StrToDateTime(const S: string): TDateTime; overload;
     class function DateTimeToStr(const D: TDateTime; const Fmt: string): string; overload;
     class function DateTimeToStr(const D: TDateTime): string; overload;
     class function ThreadFormat(const Fmt: string; const Args: array of const): string;
-    class function BytesToStr(const Bytes: Int64): string; static;
+    class function BytesToStr(const BytesCount: Int64): string; static;
     class function CompareVersion(const V1, V2: string): Integer; static;
-    class procedure DelayCall(Tick: Cardinal; Proc: TProc); static;
+    class procedure DelayCall(ATick: Cardinal; AProc: TProc); static;
     class function GetGUID: string; static;
     class function RandomStr(const ABaseChars: string; ASize: Integer): string; static;
-    class function EditDistance(const source, target: string): Integer; static;
+    class function EditDistance(const ASourceStr, ATargetStr: string): Integer; static;
     class function SimilarText(const AStr1, AStr2: string): Single; static;
 
     class function IsSpaceChar(const C: Char): Boolean; static;
@@ -47,10 +53,13 @@ type
     class function BytesToHex(const ABytes: TBytes; AOffset, ACount: Integer): string; overload; static; inline;
     class function BytesToHex(const ABytes: TBytes): string; overload; static; inline;
 
+    class function GetFullFileName(const AFileName: string): string; static;
+    class function GetFileSize(const AFileName: string): Int64; static;
+
     class property AppFile: string read FAppFile;
     class property AppPath: string read FAppPath;
     class property AppHome: string read FAppHome;
-    class property AppDocuments: string read FAppDocuments; // ios, android ¿ÉĞ´
+    class property AppDocuments: string read FAppDocuments; // ios, android å¯å†™
     class property AppName: string read FAppName;
   end;
 
@@ -88,14 +97,43 @@ begin
   Result := DateTimeToStr(D, 'yyyy-mm-dd hh:nn:ss');
 end;
 
-class procedure TUtils.DelayCall(Tick: Cardinal; Proc: TProc);
+class procedure TUtils.DelayCall(ATick: Cardinal; AProc: TProc);
 begin
   TThread.CreateAnonymousThread(
     procedure
     begin
-      Sleep(Tick);
-      Proc();
+      Sleep(ATick);
+      AProc();
     end).Start;
+end;
+
+class function TUtils.GetFileSize(const AFileName: string): Int64;
+var
+  LFileStream: TStream;
+begin
+  LFileStream := TFile.Open(AFileName, TFileMode.fmOpen, TFileAccess.faRead, TFileShare.fsReadWrite);
+  try
+    Result := LFileStream.Size;
+  finally
+    FreeAndNil(LFileStream);
+  end;
+end;
+
+class function TUtils.GetFullFileName(const AFileName: string): string;
+begin
+  if
+    {$IFDEF MSWINDOWS}
+    // Windows ä¸‹ä¸ä»¥é©±åŠ¨å™¨å·å¼€å¤´çš„æ–‡ä»¶åéƒ½è§†ä¸ºç›¸å¯¹è·¯å¾„
+    not TPath.DriveExists(AFileName)
+    {$ELSE}
+    // Posix ä¸‹ç›´æ¥è°ƒç”¨ç›¸å¯¹è·¯å¾„çš„ç°æˆå‡½æ•°åˆ¤æ–­
+    TPath.IsRelativePath(AFileName)
+    {$ENDIF}
+  then
+    // ç›¸å¯¹è·¯å¾„çš„æ–‡ä»¶åç”¨ç¨‹åºæ‰€åœ¨è·¯å¾„è¡¥å…¨
+    Result := TPath.Combine(TUtils.AppPath, AFileName)
+  else
+    Result := AFileName;
 end;
 
 class function TUtils.GetGUID: string;
@@ -135,12 +173,12 @@ begin
     Result[I] := ABaseChars[RandomRange(LBaseLow, LBaseHigh + 1)];
 end;
 
-class function TUtils.CalcTickDiff(StartTick, EndTick: Cardinal): Cardinal;
+class function TUtils.CalcTickDiff(AStartTick, AEndTick: Cardinal): Cardinal;
 begin
-  if (EndTick >= StartTick) then
-    Result := EndTick - StartTick
+  if (AEndTick >= AStartTick) then
+    Result := AEndTick - AStartTick
   else
-    Result := High(LongWord) - StartTick + EndTick;
+    Result := High(Cardinal) - AStartTick + AEndTick;
 end;
 
 class function TUtils.CompareVersion(const V1, V2: string): Integer;
@@ -171,7 +209,7 @@ end;
 
 class function TUtils.SimilarText(const AStr1, AStr2: string): Single;
 begin
-  Result := 1 - EditDistance(AStr1, AStr2) / Max(AStr1.Length, AStr2.Length);
+  Result := 1 - (EditDistance(AStr1, AStr2) / Max(AStr1.Length, AStr2.Length));
 end;
 
 class function TUtils.StrToDateTime(const S: string): TDateTime;
@@ -180,9 +218,9 @@ begin
 end;
 
 class function TUtils.StrToDateTime(const S, Fmt: string): TDateTime;
-// Fmt¸ñÊ½×Ö·û´®£º¿Õ¸ñÇ°ÊÇÈÕÆÚ¸ñÊ½£¬¿Õ¸ñºóÊÇÊ±¼ä¸ñÊ½
-// ±ØĞëÊÇÕâÑù£ºYYYY-MM-DD HH:NN:SS»òÕßMM-DD-YYYY HH:NN:SS
-// ²»ÄÜÓÃ¿Õ¸ñ×öÊ±¼äµ¥Î»ÖĞ¼äµÄ¼ä¸ô·û
+// Fmtæ ¼å¼å­—ç¬¦ä¸²ï¼šç©ºæ ¼å‰æ˜¯æ—¥æœŸæ ¼å¼ï¼Œç©ºæ ¼åæ˜¯æ—¶é—´æ ¼å¼
+// å¿…é¡»æ˜¯è¿™æ ·ï¼šYYYY-MM-DD HH:NN:SSæˆ–è€…MM-DD-YYYY HH:NN:SS
+// ä¸èƒ½ç”¨ç©ºæ ¼åšæ—¶é—´å•ä½ä¸­é—´çš„é—´éš”ç¬¦
   function GetSeparator(const S: string): Char;
   begin
     for Result in S do
@@ -248,33 +286,33 @@ begin
   Result := BytesToHex(ABytes, 0, Length(ABytes));
 end;
 
-class function TUtils.BytesToStr(const Bytes: Int64): string;
+class function TUtils.BytesToStr(const BytesCount: Int64): string;
 const
   KBYTES = Int64(1024);
   MBYTES = KBYTES * 1024;
   GBYTES = MBYTES * 1024;
   TBYTES = GBYTES * 1024;
 begin
-  if (Bytes = 0) then
+  if (BytesCount = 0) then
     Result := ''
-  else if (Bytes < KBYTES) then
-    Result := Format('%dB', [Bytes])
-  else if (Bytes < MBYTES) then
-    Result := FormatFloat('0.##KB', Bytes / KBYTES)
-  else if (Bytes < GBYTES) then
-    Result := FormatFloat('0.##MB', Bytes / MBYTES)
-  else if (Bytes < TBYTES) then
-    Result := FormatFloat('0.##GB', Bytes / GBYTES)
+  else if (BytesCount < KBYTES) then
+    Result := Format('%dB', [BytesCount])
+  else if (BytesCount < MBYTES) then
+    Result := FormatFloat('0.##KB', BytesCount / KBYTES)
+  else if (BytesCount < GBYTES) then
+    Result := FormatFloat('0.##MB', BytesCount / MBYTES)
+  else if (BytesCount < TBYTES) then
+    Result := FormatFloat('0.##GB', BytesCount / GBYTES)
   else
-    Result := FormatFloat('0.##TB', Bytes / TBYTES);
+    Result := FormatFloat('0.##TB', BytesCount / TBYTES);
 end;
 
-class function TUtils.TestTime(Proc: TProc): TTimeSpan;
+class function TUtils.TestTime(AProc: TProc): TTimeSpan;
 var
   LWatch: TStopwatch;
 begin
   LWatch := TStopwatch.StartNew;
-  Proc();
+  AProc();
   LWatch.Stop;
   Result := LWatch.Elapsed;
 end;
@@ -333,38 +371,38 @@ begin
   end;
 end;
 
-class function TUtils.EditDistance(const source, target: string): Integer;
+class function TUtils.EditDistance(const ASourceStr, ATargetStr: string): Integer;
 var
   i, j, edIns, edDel, edRep: Integer;
   d: TArray<TArray<Integer>>;
 begin
-  SetLength(d, Length(source) + 1, Length(target) + 1);
+  SetLength(d, Length(ASourceStr) + 1, Length(ATargetStr) + 1);
 
-  for i := 0 to source.Length do
+  for i := 0 to ASourceStr.Length do
     d[i][0] := i;
 
-  for j := 0 to target.Length do
+  for j := 0 to ATargetStr.Length do
     d[0][j] := j;
 
-  for i := 1 to source.Length do
+  for i := 1 to ASourceStr.Length do
   begin
-    for j := 1 to target.Length do
+    for j := 1 to ATargetStr.Length do
     begin
-      if((source[i - 1] = target[j - 1])) then
+      if((ASourceStr[i - 1] = ATargetStr[j - 1])) then
       begin
-        d[i][j] := d[i - 1][j - 1]; //²»ĞèÒª±à¼­²Ù×÷
+        d[i][j] := d[i - 1][j - 1]; //ä¸éœ€è¦ç¼–è¾‘æ“ä½œ
       end else
       begin
-        edIns := d[i][j - 1] + 1; //source ²åÈë×Ö·û
-        edDel := d[i - 1][j] + 1; //source É¾³ı×Ö·û
-        edRep := d[i - 1][j - 1] + 1; //source Ìæ»»×Ö·û
+        edIns := d[i][j - 1] + 1; //ASourceStr æ’å…¥å­—ç¬¦
+        edDel := d[i - 1][j] + 1; //ASourceStr åˆ é™¤å­—ç¬¦
+        edRep := d[i - 1][j - 1] + 1; //ASourceStr æ›¿æ¢å­—ç¬¦
 
         d[i][j] := Min(Min(edIns, edDel), edRep);
       end;
     end;
   end;
 
-  Result := d[source.length][target.length];
+  Result := d[ASourceStr.length][ATargetStr.length];
 end;
 
 end.

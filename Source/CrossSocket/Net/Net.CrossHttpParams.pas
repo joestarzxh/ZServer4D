@@ -119,6 +119,11 @@ type
     function Encode: string; virtual; abstract;
 
     /// <summary>
+    ///   获取参数值
+    /// </summary>
+    function GetParamValue(const AName: string; out AValue: string): Boolean;
+
+    /// <summary>
     ///   按名称访问参数
     /// </summary>
     property Params[const AName: string]: string read GetParam write SetParam; default;
@@ -639,7 +644,37 @@ type
     /// <param name="ASessionID">
     ///   Session ID
     /// </param>
-    function ExistsSession(const ASessionID: string): Boolean;
+    /// <param name="ASession">
+    ///   如果存在指定的Session， 则将实例保存到该参数中
+    /// </param>
+    function ExistsSession(const ASessionID: string; var ASession: ISession): Boolean; overload;
+
+    /// <summary>
+    ///   检查是否存在指定ID的Session
+    /// </summary>
+    /// <param name="ASessionID">
+    ///   Session ID
+    /// </param>
+    function ExistsSession(const ASessionID: string): Boolean; overload;
+
+    /// <summary>
+    ///   新增Session
+    /// </summary>
+    /// <param name="ASessionID">
+    ///   Session ID
+    /// </param>
+    /// <returns>
+    ///   Session实例
+    /// </returns>
+    function AddSession(const ASessionID: string): ISession; overload;
+
+    /// <summary>
+    ///   新增Session
+    /// </summary>
+    /// <returns>
+    ///   Session实例
+    /// </returns>
+    function AddSession: ISession; overload;
 
     /// <summary>
     ///   新增Session
@@ -650,7 +685,7 @@ type
     /// <param name="ASession">
     ///   Session实例
     /// </param>
-    procedure AddSession(const ASessionID: string; ASession: ISession);
+    procedure AddSession(const ASessionID: string; ASession: ISession); overload;
 
     /// <summary>
     ///   删除Session
@@ -718,8 +753,11 @@ type
     procedure EndRead; virtual; abstract;
 
     function NewSessionID: string; virtual; abstract;
-    function ExistsSession(const ASessionID: string): Boolean; virtual; abstract;
-    procedure AddSession(const ASessionID: string; ASession: ISession); virtual; abstract;
+    function ExistsSession(const ASessionID: string; var ASession: ISession): Boolean; overload; virtual; abstract;
+    function ExistsSession(const ASessionID: string): Boolean; overload; virtual;
+    function AddSession(const ASessionID: string): ISession; overload; virtual;
+    function AddSession: ISession; overload; virtual;
+    procedure AddSession(const ASessionID: string; ASession: ISession); overload; virtual; abstract;
     procedure RemoveSession(const ASessionID: string); virtual; abstract;
 
     property SessionClass: TSessionClass read GetSessionClass write SetSessionClass;
@@ -761,7 +799,7 @@ type
     procedure EndRead; override;
 
     function NewSessionID: string; override;
-    function ExistsSession(const ASessionID: string): Boolean; override;
+    function ExistsSession(const ASessionID: string; var ASession: ISession): Boolean; override;
     procedure AddSession(const ASessionID: string; ASession: ISession); override;
     procedure RemoveSession(const ASessionID: string); override;
 
@@ -852,6 +890,21 @@ begin
   for I := 0 to FParams.Count - 1 do
     if SameText(FParams[I].Name, AName) then Exit(I);
   Result := -1;
+end;
+
+function TBaseParams.GetParamValue(const AName: string;
+  out AValue: string): Boolean;
+var
+  I: Integer;
+begin
+  I := GetParamIndex(AName);
+  if (I >= 0) then
+  begin
+    AValue := FParams[I].Value;
+    Exit(True);
+  end;
+
+  Result := False;
 end;
 
 procedure TBaseParams.Remove(const AName: string);
@@ -1406,7 +1459,8 @@ begin
   if (FBoundaryBytes = nil) then Exit(0);
 
   P := ABuf;
-  for I := 0 to ALen - 1 do
+  I := 0;
+  while (I < ALen) do
   begin
     C := P[I];
     case FDecodeState of
@@ -1520,7 +1574,12 @@ begin
             Inc(FBoundaryIndex)
           else
           begin
-            FBoundaryIndex := 0;
+            if (FBoundaryIndex > 0) then
+            begin
+              Dec(I);
+              FBoundaryIndex := 0;
+            end;
+
             if (FPartDataBegin < 0) then
               FPartDataBegin := I;
           end;
@@ -1546,7 +1605,8 @@ begin
           if (I >= ALen - 1) or (FBoundaryIndex >= Length(FBoundaryBytes)) then
           begin
             // 将内存块数据存入Field中
-            FCurrentPartField.FValue.Write(P[FPartDataBegin], I - FPartDataBegin - FBoundaryIndex + 1);
+            if (FPartDataBegin >= 0) then
+              FCurrentPartField.FValue.Write(P[FPartDataBegin], I - FPartDataBegin - FBoundaryIndex + 1);
 
             // 已解析出一个完整的数据块
             if (FBoundaryIndex >= Length(FBoundaryBytes)) then
@@ -1557,7 +1617,7 @@ begin
             end else
             // 已解析到本内存块结尾, 但是发现了部分有点像Boundary的数据
             // 将其保存起来
-            if (FBoundaryIndex > 0) then
+            if (FPrevIndex = 0) and (FBoundaryIndex > 0) then
             begin
               FPrevIndex := FBoundaryIndex;
               Move(P[I - FBoundaryIndex + 1], FLookbehind[0], FBoundaryIndex);
@@ -1568,6 +1628,8 @@ begin
           end;
         end;
     end;
+
+    Inc(I);
   end;
 
   Result := ALen;
@@ -1703,6 +1765,27 @@ begin
   FLastAccessTime := Now;
 end;
 
+{ TSessionsBase }
+
+function TSessionsBase.AddSession(const ASessionID: string): ISession;
+begin
+  Result := GetSessionClass.Create(ASessionID);
+  Result.ExpiryTime := ExpiryTime;
+  AddSession(ASessionID, Result);
+end;
+
+function TSessionsBase.AddSession: ISession;
+begin
+  Result := AddSession(NewSessionID);
+end;
+
+function TSessionsBase.ExistsSession(const ASessionID: string): Boolean;
+var
+  LStuff: ISession;
+begin
+  Result := ExistsSession(ASessionID, LStuff);
+end;
+
 { TSessions }
 
 constructor TSessions.Create(ANewGUIDFunc: TFunc<string>);
@@ -1760,9 +1843,12 @@ begin
   FLocker.EndWrite;
 end;
 
-function TSessions.ExistsSession(const ASessionID: string): Boolean;
+function TSessions.ExistsSession(const ASessionID: string;
+  var ASession: ISession): Boolean;
 begin
-  Result := FSessions.ContainsKey(ASessionID);
+  Result := FSessions.TryGetValue(ASessionID, ASession);
+  if Result then
+    ASession.LastAccessTime := Now;
 end;
 
 procedure TSessions.CreateExpiredProcThread;

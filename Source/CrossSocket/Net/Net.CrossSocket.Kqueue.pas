@@ -19,6 +19,7 @@ uses
   Posix.NetinetIn,
   Posix.UniStd,
   Posix.NetDB,
+  Posix.Pthread,
   Posix.Errno,
   BSD.kqueue,
   Net.SocketAPI,
@@ -118,6 +119,7 @@ type
   TKqueueCrossSocket = class(TAbstractCrossSocket)
   private const
     MAX_EVENT_COUNT = 2048;
+    SHUTDOWN_FLAG   = Pointer(-1);
   private class threadvar
     FEventList: array [0..MAX_EVENT_COUNT-1] of TKEvent;
   private
@@ -125,6 +127,12 @@ type
     FIoThreads: TArray<TIoEventThread>;
     FIdleHandle: THandle;
     FIdleLock: TObject;
+    FStopHandle: TPipeDescriptors;
+
+    // 利用 pipe 唤醒并退出IO线程
+    procedure _OpenStopHandle; inline;
+    procedure _PostStopCommand; inline;
+    procedure _CloseStopHandle; inline;
 
     procedure _OpenIdleHandle; inline;
     procedure _CloseIdleHandle; inline;
@@ -215,21 +223,22 @@ begin
 
   if _ReadEnabled then
   begin
-    EV_SET(@LEvents[N], Socket, EVFILT_READ,
-      EV_ADD or EV_ONESHOT or EV_CLEAR or EV_DISPATCH, 0, 0, Pointer(LCrossData));
-    Inc(N);
-  end;
+    EV_SET(@LEvents[N], Socket, EVFILT_READ,
+      EV_ADD or EV_ONESHOT or EV_CLEAR or EV_DISPATCH, 0, 0, Pointer(LCrossData));
+
+    Inc(N);
+  end;
 
   if (N <= 0) then Exit(False);
 
-  Result := (kevent(LOwner.FKqueueHandle, @LEvents, N, nil, 0, nil) >= 0);
+  Result := (kevent(LOwner.FKqueueHandle, @LEvents, N, nil, 0, nil) >= 0);
 
-  {$IFDEF DEBUG}
-  if not Result then
-    _Log('listen %d kevent error %d', [Socket, GetLastError]);
-  {$ENDIF}
-end;
-
+  {$IFDEF DEBUG}
+  if not Result then
+    _Log('listen %d kevent error %d', [Socket, GetLastError]);
+  {$ENDIF}
+end;
+
 { TSendQueue }
 
 procedure TSendQueue.Notify(const Value: PSendItem;
@@ -347,37 +356,42 @@ begin
 
   if _ReadEnabled then
   begin
-    Self._AddRef;
-    EV_SET(@LEvents[N], Socket, EVFILT_READ,
-      EV_ADD or EV_ONESHOT or EV_CLEAR or EV_DISPATCH, 0, 0, Pointer(LCrossData));
-    Inc(N);
-  end;
+    Self._AddRef;
+
+    EV_SET(@LEvents[N], Socket, EVFILT_READ,
+      EV_ADD or EV_ONESHOT or EV_CLEAR or EV_DISPATCH, 0, 0, Pointer(LCrossData));
+
+    Inc(N);
+  end;
 
   if _WriteEnabled then
-  begin
-    Self._AddRef;
-    EV_SET(@LEvents[N], Socket, EVFILT_WRITE,
-      EV_ADD or EV_ONESHOT or EV_CLEAR or EV_DISPATCH, 0, 0, Pointer(LCrossData));
-    Inc(N);
-  end;
+  begin
+    Self._AddRef;
+
+    EV_SET(@LEvents[N], Socket, EVFILT_WRITE,
+      EV_ADD or EV_ONESHOT or EV_CLEAR or EV_DISPATCH, 0, 0, Pointer(LCrossData));
+
+    Inc(N);
+  end;
 
   if (N <= 0) then Exit(False);
 
-  Result := (kevent(LOwner.FKqueueHandle, @LEvents, N, nil, 0, nil) >= 0);
+  Result := (kevent(LOwner.FKqueueHandle, @LEvents, N, nil, 0, nil) >= 0);
 
-  if not Result then
-  begin
-    {$IFDEF DEBUG}
-    _Log('connection %d kevent error %d', [Socket, GetLastError]);
-    {$ENDIF}
-    while (N > 0) do
-    begin
-      Self._Release;
-      Dec(N);
-    end;
-  end;
-end;
-
+  if not Result then
+  begin
+    {$IFDEF DEBUG}
+    _Log('connection %d kevent error %d', [Socket, GetLastError]);
+    {$ENDIF}
+
+    while (N > 0) do
+    begin
+      Self._Release;
+      Dec(N);
+    end;
+  end;
+end;
+
 function TKqueueConnection._WriteEnabled: Boolean;
 begin
   Result := (ieWrite in FIoEvents);
@@ -402,6 +416,12 @@ end;
 procedure TKqueueCrossSocket._CloseIdleHandle;
 begin
   FileClose(FIdleHandle);
+end;
+
+procedure TKqueueCrossSocket._CloseStopHandle;
+begin
+  FileClose(FStopHandle.ReadDes);
+  FileClose(FStopHandle.WriteDes);
 end;
 
 procedure TKqueueCrossSocket._HandleAccept(AListen: ICrossListen);
@@ -448,35 +468,44 @@ begin
       Break;
     end;
 
+    // 边缘化触发连接请求模式，如果有多个连接，是全部放在一起处理
+    // 这里的accept与windows不同，这里需要全部accept以后，发现有问题再去立即关闭，没有windows的预处理概念
+    // 假如Accept不允许，那么后续请求队列将会全部禁止连接，直到到请求队列为空
+    if not TriggerAccept(AListen) then
+      begin
+        TSocketAPI.CloseSocket(LSocket);
+        continue;
+      end;
+
     LClientSocket := LSocket;
     TSocketAPI.SetNonBlock(LClientSocket, True);
     SetKeepAlive(LClientSocket);
+    TSocketAPI.SetTcpNoDelay(LClientSocket, True);
     _SetNoSigPipe(LClientSocket);
 
     LConnection := CreateConnection(Self, LClientSocket, ctAccept);
     TriggerConnecting(LConnection);
+    TriggerConnected(LConnection);
 
     // 连接建立后监视Socket的读事件
     LKqConnection := LConnection as TKqueueConnection;
     LKqConnection._Lock;
     try
       LSuccess := LKqConnection._UpdateIoEvent([ieRead]);
-    finally
-      LKqConnection._Unlock;
-    end;
-
-    if LSuccess then
-      TriggerConnected(LConnection)
-    else
-      TriggerDisconnected(LConnection);
-  end;
-
+    finally
+      LKqConnection._Unlock;
+    end;
+
+    if not LSuccess then
+      TriggerDisconnected(LConnection);
+  end;
+
   // 继续接收新连接
   LKqListen := LListen as TKqueueListen;
   LKqListen._Lock;
   LKqListen._UpdateIoEvent([ieRead]);
-  LKqListen._Unlock;
-end;
+  LKqListen._Unlock;
+end;
 
 procedure TKqueueCrossSocket._HandleConnect(AConnection: ICrossConnection);
 var
@@ -498,7 +527,8 @@ begin
   end;
 
   LKqConnection := LConnection as TKqueueConnection;
-  LKqConnection._Lock;
+
+  LKqConnection._Lock;
   try
     LConnectCallback := LKqConnection.FConnectCallback;
     LKqConnection.FConnectCallback := nil;
@@ -581,72 +611,98 @@ var
   LCallback: TProc<ICrossConnection, Boolean>;
   LSent: Integer;
 begin
+  // 查阅了资料，linux和unit系统级的io函数都会很安静，不会像windows，动不动就给你抛个异常，处于易读性和调试需要，我干掉了改队列缓存操作的try部分
   LConnection := AConnection;
   LKqConnection := LConnection as TKqueueConnection;
 
   LKqConnection._Lock;
-  try
+
+  // 队列中没有数据了, 清除 ioWrite 标志
+  if (LKqConnection.FSendQueue.Count <= 0) then
+  begin
+    LKqConnection._Unlock;
+    LKqConnection._UpdateIoEvent([]);
+    Exit;
+  end;
+
+  // 获取Socket发送队列中的第一条数据
+  LSendItem := LKqConnection.FSendQueue.Items[0];
+
+  // 发送数据
+  LSent := PosixSend(LConnection.Socket, LSendItem.Data, LSendItem.Size);
+
+  {$region '全部发送完成'}
+  if (LSent >= LSendItem.Size) then
+  begin
+    // 先保存回调函数, 避免后面删除队列后将其释放
+    LCallback := LSendItem.Callback;
+
+    // 发送成功, 移除已发送成功的数据
+    if (LKqConnection.FSendQueue.Count > 0) then
+      LKqConnection.FSendQueue.Delete(0);
+
     // 队列中没有数据了, 清除 ioWrite 标志
     if (LKqConnection.FSendQueue.Count <= 0) then
-    begin
       LKqConnection._UpdateIoEvent([]);
-      Exit;
-    end;
 
-    // 获取Socket发送队列中的第一条数据
-    LSendItem := LKqConnection.FSendQueue.Items[0];
+    // 由于kqueue要管理数据发送队列，每次发送前，队列都要被锁定，当队列操作完成，才去解锁，这里在发送以后，还保持了锁定
+    // 外部程序在回调事件继续发送下一段数据，会导致外面的程序被锁死，如果在外围解决，正解需要抛出一个后置事件，实现太麻烦，直接修改流程
+    // 查阅了资料，linux和unit系统级的io函数都会很安静，不会像windows，动不动就给你抛个异常，处于易读性和调试需要，我干掉了改队列缓存操作的try部分
+    // 其它地方一切正常，by qq600585
+    LKqConnection._Unlock;
 
-    // 发送数据
-    LSent := PosixSend(LConnection.Socket, LSendItem.Data, LSendItem.Size);
+    if Assigned(LCallback) then
+      LCallback(LConnection, True);
 
-    {$region '全部发送完成'}
-    if (LSent >= LSendItem.Size) then
-    begin
-      // 先保存回调函数, 避免后面删除队列后将其释放
-      LCallback := LSendItem.Callback;
+    Exit;
+  end;
+  {$endregion}
 
-      // 发送成功, 移除已发送成功的数据
-      if (LKqConnection.FSendQueue.Count > 0) then
-        LKqConnection.FSendQueue.Delete(0);
-
-      // 队列中没有数据了, 清除 ioWrite 标志
-      if (LKqConnection.FSendQueue.Count <= 0) then
-        LKqConnection._UpdateIoEvent([]);
-
-      if Assigned(LCallback) then
-        LCallback(LConnection, True);
-
-      Exit;
-    end;
-    {$endregion}
-
-    {$region '连接断开或发送错误'}
-    // 发送失败的回调会在连接对象的destroy方法中被调用
-    if (LSent < 0) then Exit;
-    {$endregion}
-
+  // 发送失败的回调会在连接对象的destroy方法中被调用
+  if (LSent > 0) then
+  begin
     {$region '部分发送成功,在下一次唤醒发送线程时继续处理剩余部分'}
     Dec(LSendItem.Size, LSent);
     Inc(LSendItem.Data, LSent);
     {$endregion}
 
     LKqConnection._UpdateIoEvent([ieWrite]);
-  finally
-    LKqConnection._Unlock;
   end;
+
+  LKqConnection._Unlock;
 end;
-
+
+
 procedure TKqueueCrossSocket._OpenIdleHandle;
 begin
   FIdleHandle := FileOpen('/dev/null', fmOpenRead);
 end;
 
-procedure TKqueueCrossSocket._SetNoSigPipe(ASocket: THandle);
+procedure TKqueueCrossSocket._OpenStopHandle;
 var
-  LOptVal: Integer;
+  LEvent: TKEvent;
 begin
-  LOptVal := 1;
-  TSocketAPI.SetSockOpt(ASocket, SOL_SOCKET, SO_NOSIGPIPE, LOptVal, SizeOf(Integer));
+  pipe(FStopHandle);
+
+  // 这里不使用 EV_ONESHOT
+  // 这样可以保证通知退出的命令发出后, 所有IO线程都会收到
+  EV_SET(@LEvent, FStopHandle.ReadDes, EVFILT_READ,
+    EV_ADD, 0, 0, SHUTDOWN_FLAG);
+  kevent(FKqueueHandle, @LEvent, 1, nil, 0, nil);
+end;
+
+procedure TKqueueCrossSocket._PostStopCommand;
+var
+  LStuff: UInt64;
+begin
+  LStuff := 1;
+  // 往 FStopHandle.WriteDes 写入任意数据, 唤醒工作线程
+  Posix.UniStd.__write(FStopHandle.WriteDes, @LStuff, SizeOf(LStuff));
+end;
+
+procedure TKqueueCrossSocket._SetNoSigPipe(ASocket: THandle);
+begin
+  TSocketAPI.SetSockOpt<Integer>(ASocket, SOL_SOCKET, SO_NOSIGPIPE, 1);
 end;
 
 procedure TKqueueCrossSocket.StartLoop;
@@ -661,11 +717,14 @@ begin
   SetLength(FIoThreads, GetIoThreads);
   for I := 0 to Length(FIoThreads) - 1 do
     FIoThreads[i] := TIoEventThread.Create(Self);
+
+  _OpenStopHandle;
 end;
 
 procedure TKqueueCrossSocket.StopLoop;
 var
   I: Integer;
+  LCurrentThreadID: TThreadID;
 begin
   if (FIoThreads = nil) then Exit;
 
@@ -673,16 +732,22 @@ begin
 
   while (ListensCount > 0) or (ConnectionsCount > 0) do Sleep(1);
 
-  Posix.UniStd.__close(FKqueueHandle);
+  _PostStopCommand;
 
+  LCurrentThreadID := GetCurrentThreadId;
   for I := 0 to Length(FIoThreads) - 1 do
   begin
+    if (FIoThreads[I].ThreadID = LCurrentThreadID) then
+      raise ECrossSocket.Create('不能在IO线程中执行StopLoop!');
+
     FIoThreads[I].WaitFor;
     FreeAndNil(FIoThreads[I]);
   end;
   FIoThreads := nil;
 
+  FileClose(FKqueueHandle);
   _CloseIdleHandle;
+  _CloseStopHandle;
 end;
 
 procedure TKqueueCrossSocket.Connect(const AHost: string; APort: Word;
@@ -829,6 +894,9 @@ begin
       TSocketAPI.SetNonBlock(LListenSocket, True);
       TSocketAPI.SetReUseAddr(LListenSocket, True);
 
+      if (LAddrInfo.ai_family = AF_INET6) then
+        TSocketAPI.SetSockOpt<Integer>(LListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, 1);
+
       if (TSocketAPI.Bind(LListenSocket, LAddrInfo.ai_addr, LAddrInfo.ai_addrlen) < 0)
         or (TSocketAPI.Listen(LListenSocket) < 0) then
       begin
@@ -847,13 +915,14 @@ begin
         LSuccess := LKqListen._UpdateIoEvent([ieRead]);
       finally
         LKqListen._Unlock;
-      end;
+      end;
 
       if not LSuccess then
       begin
-        _Failed;
-        Exit;
-      end;
+        _Failed;
+
+        Exit;
+      end;
 
       // 监听成功
       TriggerListened(LListen);
@@ -885,8 +954,9 @@ begin
   LSendItem.Size := ALen;
   LSendItem.Callback := ACallback;
 
-  LKqConnection := AConnection as TKqueueConnection;
-  LKqConnection._Lock;
+  LKqConnection := AConnection as TKqueueConnection;
+
+  LKqConnection._Lock;
   try
     // 将数据放入队列
     LKqConnection.FSendQueue.Add(LSendItem);
@@ -920,6 +990,10 @@ begin
   for I := 0 to LRet - 1 do
   begin
     LEvent := FEventList[I];
+
+    // 收到退出命令
+    if (LEvent.uData = SHUTDOWN_FLAG) then Exit(False);
+
     if (LEvent.uData = nil) then Continue;
 
     {$region '获取连接或监听对象'}

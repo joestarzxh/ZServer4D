@@ -1,186 +1,258 @@
-{******************************************************************************}
-{* ObjectDB Stream support,                                                   *}
-{* https://github.com/PassByYou888/CoreCipher                                 *}
-(* https://github.com/PassByYou888/ZServer4D                                  *)
-{******************************************************************************}
+{ ****************************************************************************** }
+{ * ObjectDB Stream         by qq600585                                        * }
+{ * https://zpascal.net                                                        * }
+{ * https://github.com/PassByYou888/zAI                                        * }
+{ * https://github.com/PassByYou888/ZServer4D                                  * }
+{ * https://github.com/PassByYou888/PascalString                               * }
+{ * https://github.com/PassByYou888/zRasterization                             * }
+{ * https://github.com/PassByYou888/CoreCipher                                 * }
+{ * https://github.com/PassByYou888/zSound                                     * }
+{ * https://github.com/PassByYou888/zChinese                                   * }
+{ * https://github.com/PassByYou888/zExpression                                * }
+{ * https://github.com/PassByYou888/zGameWare                                  * }
+{ * https://github.com/PassByYou888/zAnalysis                                  * }
+{ * https://github.com/PassByYou888/FFMPEG-Header                              * }
+{ * https://github.com/PassByYou888/zTranslate                                 * }
+{ * https://github.com/PassByYou888/InfiniteIoT                                * }
+{ * https://github.com/PassByYou888/FastMD5                                    * }
+{ ****************************************************************************** }
+(*
+  update history
+*)
 
 unit ItemStream;
 
-{$I zDefine.inc}
+{$INCLUDE zDefine.inc}
 
 interface
 
-uses SysUtils, CoreClasses, Classes, UnicodeMixedLib, ObjectData, ObjectDataManager;
+uses SysUtils, CoreClasses, Classes, UnicodeMixedLib, ObjectData, ObjectDataManager, PascalStrings;
 
 type
   TItemStream = class(TCoreClassStream)
   private
-    FItemHnd : TItemHandle;
-    FDBEngine: TObjectDataManager;
+    DB_Engine: TObjectDataManager;
+    ItemHnd_Ptr: PItemHandle;
+    AutoFreeHnd: Boolean;
   protected
     function GetSize: Int64; override;
   public
-    constructor Create(DBEngine: TObjectDataManager; DBPath, DBItem: string); overload;
-    constructor Create(DBEngine: TObjectDataManager; var ItemHnd: TItemHandle); overload;
-    constructor Create; overload;
+    constructor Create(eng_: TObjectDataManager; DBPath, DBItem: SystemString); overload;
+    constructor Create(eng_: TObjectDataManager; var ItemHnd: TItemHandle); overload;
+    constructor Create(eng_: TObjectDataManager; const ItemHeaderPos: Int64); overload;
     destructor Destroy; override;
-    procedure ChangeHandle(DBEngine: TObjectDataManager; var ItemHnd: TItemHandle);
-    function Read(var Buffer; Count: Longint): Longint; override;
-    function Write(const Buffer; Count: Longint): Longint; override;
-    function Seek(Offset: Longint; Origin: Word): Longint; overload; override;
-    function Seek(const Offset: Int64; Origin: TSeekOrigin): Int64; overload; override;
+
+    procedure SaveToFile(fn: SystemString);
+    procedure LoadFromFile(fn: SystemString);
+
+    function read(var buffer; Count: longint): longint; override;
+    function write(const buffer; Count: longint): longint; override;
+
+    function Seek(Offset: longint; origin: Word): longint; overload; override;
+    function Seek(const Offset: Int64; origin: TSeekOrigin): Int64; overload; override;
+
+    function CopyFrom64(const Source: TCoreClassStream; Count: Int64): Int64;
+
     procedure SeekStart;
     procedure SeekLast;
     function UpdateHandle: Boolean;
     function CloseHandle: Boolean;
-    function Hnd: PItemHandle;
-  end;
-
-  TItemStreamEngine = class(TItemStream)
-  public
-    destructor Destroy; override;
+    property Hnd: PItemHandle read ItemHnd_Ptr;
   end;
 
 implementation
 
 function TItemStream.GetSize: Int64;
 begin
-  Result := FDBEngine.ItemGetSize(FItemHnd);
+  Result := DB_Engine.ItemGetSize(ItemHnd_Ptr^);
 end;
 
-constructor TItemStream.Create;
+constructor TItemStream.Create(eng_: TObjectDataManager; DBPath, DBItem: SystemString);
 begin
   inherited Create;
-  FDBEngine := nil;
-  InitTTMDBItemHandle(FItemHnd);
+  DB_Engine := eng_;
+  New(ItemHnd_Ptr);
+  eng_.ItemAutoOpenOrCreate(DBPath, DBItem, DBItem, ItemHnd_Ptr^);
+  AutoFreeHnd := True;
 end;
 
-constructor TItemStream.Create(DBEngine: TObjectDataManager; DBPath, DBItem: string);
-var
-  ihnd: TItemHandle;
+constructor TItemStream.Create(eng_: TObjectDataManager; var ItemHnd: TItemHandle);
 begin
   inherited Create;
-  DBEngine.ItemAutoConnect(DBPath, DBItem, DBItem, ihnd);
-  ChangeHandle(DBEngine, ihnd);
+  DB_Engine := eng_;
+  ItemHnd_Ptr := @ItemHnd;
+  AutoFreeHnd := False;
 end;
 
-constructor TItemStream.Create(DBEngine: TObjectDataManager; var ItemHnd: TItemHandle);
+constructor TItemStream.Create(eng_: TObjectDataManager; const ItemHeaderPos: Int64);
 begin
   inherited Create;
-  ChangeHandle(DBEngine, ItemHnd);
+  DB_Engine := eng_;
+  New(ItemHnd_Ptr);
+  eng_.ItemFastOpen(ItemHeaderPos, ItemHnd_Ptr^);
+  AutoFreeHnd := True;
 end;
 
 destructor TItemStream.Destroy;
 begin
+  UpdateHandle();
+  if AutoFreeHnd then
+    begin
+      Dispose(ItemHnd_Ptr);
+      ItemHnd_Ptr := nil;
+    end;
   inherited Destroy;
 end;
 
-procedure TItemStream.ChangeHandle(DBEngine: TObjectDataManager; var ItemHnd: TItemHandle);
+procedure TItemStream.SaveToFile(fn: SystemString);
+var
+  stream: TCoreClassStream;
 begin
-  FDBEngine := DBEngine;
-  FItemHnd := ItemHnd;
-  FDBEngine.ItemSeek(FItemHnd, 0);
+  stream := TCoreClassFileStream.Create(fn, fmCreate);
+  try
+      stream.CopyFrom(Self, Size);
+  finally
+      DisposeObject(stream);
+  end;
 end;
 
-function TItemStream.Read(var Buffer; Count: Longint): Longint;
+procedure TItemStream.LoadFromFile(fn: SystemString);
 var
-  _P   : Int64;
+  stream: TCoreClassStream;
+begin
+  stream := TCoreClassFileStream.Create(fn, fmOpenRead or fmShareDenyNone);
+  try
+      CopyFrom(stream, stream.Size);
+  finally
+      DisposeObject(stream);
+  end;
+end;
+
+function TItemStream.read(var buffer; Count: longint): longint;
+var
+  _P: Int64;
   _Size: Int64;
 begin
   Result := 0;
   if (Count > 0) then
     begin
-      _P := FDBEngine.ItemGetPos(FItemHnd);
-      _Size := FDBEngine.ItemGetSize(FItemHnd);
+      _P := DB_Engine.ItemGetPos(ItemHnd_Ptr^);
+      _Size := DB_Engine.ItemGetSize(ItemHnd_Ptr^);
       if _P + Count <= _Size then
         begin
-          if FDBEngine.ItemRead(FItemHnd, Count, PByte(@Buffer)^) then
+          if DB_Engine.ItemRead(ItemHnd_Ptr^, Count, PByte(@buffer)^) then
               Result := Count;
         end
-      else if FDBEngine.ItemRead(FItemHnd, _Size - _P, PByte(@Buffer)^) then
+      else if DB_Engine.ItemRead(ItemHnd_Ptr^, _Size - _P, PByte(@buffer)^) then
           Result := _Size - _P;
     end;
 end;
 
-function TItemStream.Write(const Buffer; Count: Longint): Longint;
+function TItemStream.write(const buffer; Count: longint): longint;
 begin
   Result := Count;
   if (Count > 0) then
-    if not FDBEngine.ItemWrite(FItemHnd, Count, PByte(@Buffer)^) then
+    if not DB_Engine.ItemWrite(ItemHnd_Ptr^, Count, PByte(@buffer)^) then
       begin
         Result := 0;
       end;
 end;
 
-function TItemStream.Seek(Offset: Longint; Origin: Word): Longint;
+function TItemStream.Seek(Offset: longint; origin: Word): longint;
 begin
-  case Origin of
+  case origin of
     soFromBeginning:
       begin
-        FDBEngine.ItemSeek(FItemHnd, Offset);
+        DB_Engine.ItemSeek(ItemHnd_Ptr^, Offset);
       end;
     soFromCurrent:
       begin
         if Offset <> 0 then
-            FDBEngine.ItemSeek(FItemHnd, FDBEngine.ItemGetPos(FItemHnd) + Offset);
+            DB_Engine.ItemSeek(ItemHnd_Ptr^, DB_Engine.ItemGetPos(ItemHnd_Ptr^) + Offset);
       end;
     soFromEnd:
       begin
-        FDBEngine.ItemSeek(FItemHnd, FDBEngine.ItemGetSize(FItemHnd) + Offset);
+        DB_Engine.ItemSeek(ItemHnd_Ptr^, DB_Engine.ItemGetSize(ItemHnd_Ptr^) + Offset);
       end;
   end;
-  Result := FDBEngine.ItemGetPos(FItemHnd);
+  Result := DB_Engine.ItemGetPos(ItemHnd_Ptr^);
 end;
 
-function TItemStream.Seek(const Offset: Int64; Origin: TSeekOrigin): Int64;
+function TItemStream.Seek(const Offset: Int64; origin: TSeekOrigin): Int64;
 begin
-  case Origin of
+  case origin of
     TSeekOrigin.soBeginning:
       begin
-        FDBEngine.ItemSeek(FItemHnd, Offset);
+        DB_Engine.ItemSeek(ItemHnd_Ptr^, Offset);
       end;
     TSeekOrigin.soCurrent:
       begin
         if Offset <> 0 then
-            FDBEngine.ItemSeek(FItemHnd, FDBEngine.ItemGetPos(FItemHnd) + Offset);
+            DB_Engine.ItemSeek(ItemHnd_Ptr^, DB_Engine.ItemGetPos(ItemHnd_Ptr^) + Offset);
       end;
     TSeekOrigin.soEnd:
       begin
-        FDBEngine.ItemSeek(FItemHnd, FDBEngine.ItemGetSize(FItemHnd) + Offset);
+        DB_Engine.ItemSeek(ItemHnd_Ptr^, DB_Engine.ItemGetSize(ItemHnd_Ptr^) + Offset);
       end;
   end;
-  Result := FDBEngine.ItemGetPos(FItemHnd);
+  Result := DB_Engine.ItemGetPos(ItemHnd_Ptr^);
+end;
+
+function TItemStream.CopyFrom64(const Source: TCoreClassStream; Count: Int64): Int64;
+const
+  MaxBufSize = $F000;
+var
+  BufSize, N: Int64;
+  buffer: PByte;
+begin
+  if Count <= 0 then
+    begin
+      Source.Position := 0;
+      Count := Source.Size;
+    end;
+  Result := Count;
+  if Count > MaxBufSize then
+      BufSize := MaxBufSize
+  else
+      BufSize := Count;
+  buffer := System.GetMemory(BufSize);
+  try
+    while Count <> 0 do
+      begin
+        if Count > BufSize then
+            N := BufSize
+        else
+            N := Count;
+        Source.ReadBuffer(buffer^, N);
+        WriteBuffer(buffer^, N);
+        Dec(Count, N);
+      end;
+  finally
+      System.FreeMem(buffer);
+  end;
 end;
 
 procedure TItemStream.SeekStart;
 begin
-  FDBEngine.ItemSeekStart(FItemHnd);
+  DB_Engine.ItemSeekStart(ItemHnd_Ptr^);
 end;
 
 procedure TItemStream.SeekLast;
 begin
-  FDBEngine.ItemSeekLast(FItemHnd);
+  DB_Engine.ItemSeekLast(ItemHnd_Ptr^);
 end;
 
 function TItemStream.UpdateHandle: Boolean;
 begin
-  Result := FDBEngine.ItemUpdate(FItemHnd);
+  if DB_Engine.IsOnlyRead then
+      Result := False
+  else
+      Result := DB_Engine.ItemUpdate(ItemHnd_Ptr^);
 end;
 
 function TItemStream.CloseHandle: Boolean;
 begin
-  Result := FDBEngine.ItemClose(FItemHnd);
-end;
-
-function TItemStream.Hnd: PItemHandle;
-begin
-  Result := @FItemHnd;
-end;
-
-destructor TItemStreamEngine.Destroy;
-begin
-  UpdateHandle;
-  inherited Destroy;
+  Result := DB_Engine.ItemClose(ItemHnd_Ptr^);
 end;
 
 end.

@@ -9,6 +9,11 @@
 {******************************************************************************}
 unit Net.CrossSocket.Base;
 
+// 是否将大块数据分成小块发送(仅IOCP下有效)
+// 注意: 开启该开关的情况下, 同一个连接不要在一次发送尚未结束时开始另一次发送
+//       否则会导致两块数据被分成小块后出现交错
+{.$DEFINE __LITTLE_PIECE__}
+
 interface
 
 uses
@@ -16,7 +21,8 @@ uses
   System.Classes,
   System.Math,
   System.Generics.Collections,
-  Net.SocketAPI, CoreClasses;
+  Net.SocketAPI,
+  CoreClasses, DoStatusIO;
 
 const
   // 唯一编号类别
@@ -35,6 +41,8 @@ const
   IPv6_LOCAL = '::1';
 
 type
+  ECrossSocket = class(Exception);
+
   ICrossSocket = interface;
 
   /// <summary>
@@ -94,6 +102,13 @@ type
     function GetLocalAddr: string;
     function GetLocalPort: Word;
     function GetIsClosed: Boolean;
+    function GetUserData: Pointer;
+    function GetUserObject: TObject;
+    function GetUserInterface: IInterface;
+
+    procedure SetUserData(const AValue: Pointer);
+    procedure SetUserObject(const AValue: TObject);
+    procedure SetUserInterface(const AValue: IInterface);
 
     /// <summary>
     ///   更新套接字地址信息
@@ -137,6 +152,21 @@ type
     ///   是否已关闭
     /// </summary>
     property IsClosed: Boolean read GetIsClosed;
+
+    /// <summary>
+    ///   用户数据(可以用于存储用户自定义的数据结构)
+    /// </summary>
+    property UserData: Pointer read GetUserData write SetUserData;
+
+    /// <summary>
+    ///   用户数据(可以用于存储用户自定义的数据结构)
+    /// </summary>
+    property UserObject: TObject read GetUserObject write SetUserObject;
+
+    /// <summary>
+    ///   用户数据(可以用于存储用户自定义的数据结构)
+    /// </summary>
+    property UserInterface: IInterface read GetUserInterface write SetUserInterface;
   end;
   TCrossDatas = TDictionary<UInt64, ICrossData>;
 
@@ -175,16 +205,8 @@ type
     function GetPeerPort: Word;
     function GetConnectType: TConnectType;
     function GetConnectStatus: TConnectStatus;
-
     procedure SetConnectStatus(const Value: TConnectStatus);
-
-    /// <summary>
-    ///   外部接口
-    /// </summary>
-    function GetUserObject: TObject;
-    procedure SetUserObject(const value: TObject);
     function ConnectionIntf: TObject;
-    property UserObject: TObject read GetUserObject write SetUserObject;
 
     /// <summary>
     ///   优雅关闭
@@ -204,21 +226,6 @@ type
     ///   全部数据发送完成或者出错时调用的回调函数
     /// </param>
     procedure SendBuf(ABuffer: Pointer; ACount: Integer;
-      const ACallback: TProc<ICrossConnection, Boolean> = nil); overload;
-
-    /// <summary>
-    ///   发送无类型数据
-    /// </summary>
-    /// <param name="ABuffer">
-    ///   无类型数据
-    /// </param>
-    /// <param name="ACount">
-    ///   数据大小
-    /// </param>
-    /// <param name="ACallback">
-    ///   全部数据发送完成或者出错时调用的回调函数
-    /// </param>
-    procedure SendBuf(const ABuffer; ACount: Integer;
       const ACallback: TProc<ICrossConnection, Boolean> = nil); overload;
 
     /// <summary>
@@ -298,6 +305,7 @@ type
   end;
   TCrossConnections = TDictionary<UInt64, ICrossConnection>;
 
+  TCrossAcceptEvent = procedure(Sender: TObject; AListen: ICrossListen; var Accept:Boolean) of object;
   TCrossListenEvent = procedure(Sender: TObject; AListen: ICrossListen) of object;
   TCrossConnectEvent = procedure(Sender: TObject; AConnection: ICrossConnection) of object;
   TCrossDataEvent = procedure(Sender: TObject; AConnection: ICrossConnection; ABuf: Pointer; ALen: Integer) of object;
@@ -563,6 +571,9 @@ type
     FSocket: THandle;
     FLocalAddr: string;
     FLocalPort: Word;
+    FUserData: Pointer;
+    FUserObject: TObject;
+    FUserInterface: IInterface;
   protected
     function GetOwner: ICrossSocket;
     function GetUIDTag: Byte; virtual;
@@ -571,6 +582,13 @@ type
     function GetLocalAddr: string;
     function GetLocalPort: Word;
     function GetIsClosed: Boolean; virtual; abstract;
+    function GetUserData: Pointer;
+    function GetUserObject: TObject;
+    function GetUserInterface: IInterface;
+
+    procedure SetUserData(const AValue: Pointer);
+    procedure SetUserObject(const AValue: TObject);
+    procedure SetUserInterface(const AValue: IInterface);
   public
     constructor Create(AOwner: ICrossSocket; ASocket: THandle); virtual;
     destructor Destroy; override;
@@ -584,6 +602,9 @@ type
     property LocalAddr: string read GetLocalAddr;
     property LocalPort: Word read GetLocalPort;
     property IsClosed: Boolean read GetIsClosed;
+    property UserData: Pointer read GetUserData write SetUserData;
+    property UserObject: TObject read GetUserObject write SetUserObject;
+    property UserInterface: IInterface read GetUserInterface write SetUserInterface;
   end;
 
   TAbstractCrossListen = class(TCrossData, ICrossListen)
@@ -613,13 +634,12 @@ type
 
   TAbstractCrossConnection = class(TCrossData, ICrossConnection)
   public const
-    SND_BUF_SIZE = 32768;
+    SND_BUF_SIZE = 16384;
   private
     FPeerAddr: string;
     FPeerPort: Word;
     FConnectType: TConnectType;
     FConnectStatus: Integer;
-    FUserObject:TObject;
   protected
     function GetUIDTag: Byte; override;
     function GetPeerAddr: string;
@@ -631,8 +651,6 @@ type
     function _SetConnectStatus(const AStatus: TConnectStatus): TConnectStatus; inline;
     procedure SetConnectStatus(const Value: TConnectStatus);
 
-    function GetUserObject: TObject;
-    procedure SetUserObject(const value: TObject);
     function ConnectionIntf: TObject;
 
     procedure DirectSend(ABuffer: Pointer; ACount: Integer;
@@ -647,8 +665,6 @@ type
 
     procedure SendBuf(ABuffer: Pointer; ACount: Integer;
       const ACallback: TProc<ICrossConnection, Boolean> = nil); overload;
-    procedure SendBuf(const ABuffer; ACount: Integer;
-      const ACallback: TProc<ICrossConnection, Boolean> = nil); overload; inline;
     procedure SendBytes(const ABytes: TBytes; AOffset, ACount: Integer;
       const ACallback: TProc<ICrossConnection, Boolean> = nil); overload;
     procedure SendBytes(const ABytes: TBytes;
@@ -677,7 +693,10 @@ type
     constructor Create(ACrossSocket: ICrossSocket); reintroduce;
   end;
 
-  TAbstractCrossSocket = class abstract(TInterfacedObject, ICrossSocket)
+  //在zs中使用CrossSocket，因为服务器会在一个实例中创建多个
+  //如果给引用计数，在释放时会造成内存泄漏，所以这里我们使用zs的接口框架，不用引用计数
+  //这里是我修改的，已通知过作者,by QQ600585
+  TAbstractCrossSocket = class abstract(TCoreClassInterfacedObject, ICrossSocket)
   protected const
     RCV_BUF_SIZE = 32768;
   protected class threadvar
@@ -696,6 +715,7 @@ type
 
     FOnListened: TCrossListenEvent;
     FOnListenEnd: TCrossListenEvent;
+    FOnAccept: TCrossAcceptEvent;
     FOnConnected: TCrossConnectEvent;
     FOnDisconnected: TCrossConnectEvent;
     FOnReceived: TCrossDataEvent;
@@ -714,6 +734,7 @@ type
     function GetOnDisconnected: TCrossConnectEvent;
     function GetOnListened: TCrossListenEvent;
     function GetOnListenEnd: TCrossListenEvent;
+    function GetOnAccept: TCrossAcceptEvent;
     function GetOnReceived: TCrossDataEvent;
     function GetOnSent: TCrossDataEvent;
 
@@ -721,6 +742,7 @@ type
     procedure SetOnDisconnected(const Value: TCrossConnectEvent);
     procedure SetOnListened(const Value: TCrossListenEvent);
     procedure SetOnListenEnd(const Value: TCrossListenEvent);
+    procedure SetOnAccept(const Value: TCrossAcceptEvent);
     procedure SetOnReceived(const Value: TCrossDataEvent);
     procedure SetOnSent(const Value: TCrossDataEvent);
   protected
@@ -741,6 +763,7 @@ type
     {$region '物理事件'}
     procedure TriggerListened(AListen: ICrossListen); virtual;
     procedure TriggerListenEnd(AListen: ICrossListen); virtual;
+    function TriggerAccept(AListen: ICrossListen): Boolean; virtual;
 
     procedure TriggerConnecting(AConnection: ICrossConnection); virtual;
     procedure TriggerConnected(AConnection: ICrossConnection); virtual;
@@ -797,6 +820,7 @@ type
 
     property OnListened: TCrossListenEvent read GetOnListened write SetOnListened;
     property OnListenEnd: TCrossListenEvent read GetOnListenEnd write SetOnListenEnd;
+    property OnAccept: TCrossAcceptEvent read GetOnAccept write SetOnAccept;
     property OnConnected: TCrossConnectEvent read GetOnConnected write SetOnConnected;
     property OnDisconnected: TCrossConnectEvent read GetOnDisconnected write SetOnDisconnected;
     property OnReceived: TCrossDataEvent read GetOnReceived write SetOnReceived;
@@ -805,14 +829,11 @@ type
 
   function GetTagByUID(const AUID: UInt64): Byte;
 
-  procedure _LogLastOsError;
+  procedure _LogLastOsError(const ATag: string = '');
   procedure _Log(const S: string); overload;
   procedure _Log(const Fmt: string; const Args: array of const); overload;
 
 implementation
-
-uses
-  Utils.Logger;
 
 function GetTagByUID(const AUID: UInt64): Byte;
 begin
@@ -822,10 +843,9 @@ end;
 
 procedure _Log(const S: string); overload;
 begin
-  if IsConsole then
-    Writeln(S)
-  else
-    AppendLog(S);
+  {$IFDEF DEBUG}
+  DoStatus(s);
+  {$ENDIF}
 end;
 
 procedure _Log(const Fmt: string; const Args: array of const); overload;
@@ -833,17 +853,22 @@ begin
   _Log(Format(Fmt, Args));
 end;
 
-procedure _LogLastOsError;
+procedure _LogLastOsError(const ATag: string);
 {$IFDEF DEBUG}
 var
   LError: Integer;
+  LErrMsg: string;
 {$ENDIF}
 begin
   {$IFDEF DEBUG}
   LError := GetLastError;
-  _Log('System Error.  Code: %0:d(%0:.4x), %1:s',
+  if (ATag <> '') then
+    LErrMsg := ATag + ' : '
+  else
+    LErrMsg := '';
+  LErrMsg := LErrMsg + Format('System Error.  Code: %0:d(%0:.4x), %1:s',
     [LError, SysErrorMessage(LError)]);
-//  RaiseLastOSError(LError);
+  _Log(LErrMsg);
   {$ENDIF}
 end;
 
@@ -888,8 +913,8 @@ end;
 
 procedure TAbstractCrossSocket.CloseAll;
 begin
-  CloseAllConnections;
   CloseAllListens;
+  CloseAllConnections;
 end;
 
 procedure TAbstractCrossSocket.CloseAllConnections;
@@ -1012,6 +1037,11 @@ begin
   Result := FOnListenEnd;
 end;
 
+function TAbstractCrossSocket.GetOnAccept: TCrossAcceptEvent;
+begin
+  Result := FOnAccept;
+end;
+
 function TAbstractCrossSocket.GetOnReceived: TCrossDataEvent;
 begin
   Result := FOnReceived;
@@ -1058,7 +1088,7 @@ end;
 
 function TAbstractCrossSocket.SetKeepAlive(ASocket: THandle): Integer;
 begin
-  Result := TSocketAPI.SetKeepAlive(ASocket, 5, 3, 5);
+  Result := TSocketAPI.SetKeepAlive(ASocket, 2, 1, 2);
 end;
 
 procedure TAbstractCrossSocket.SetOnConnected(const Value: TCrossConnectEvent);
@@ -1079,6 +1109,11 @@ end;
 procedure TAbstractCrossSocket.SetOnListenEnd(const Value: TCrossListenEvent);
 begin
   FOnListenEnd := Value;
+end;
+
+procedure TAbstractCrossSocket.SetOnAccept(const Value: TCrossAcceptEvent);
+begin
+  FOnAccept := Value;
 end;
 
 procedure TAbstractCrossSocket.SetOnReceived(const Value: TCrossDataEvent);
@@ -1152,17 +1187,24 @@ end;
 
 procedure TAbstractCrossSocket.TriggerListenEnd(AListen: ICrossListen);
 begin
-  System.TMonitor.Enter(FListensLock);
+  _LockListens;
   try
     if not FListens.ContainsKey(AListen.UID) then Exit;
     FListens.Remove(AListen.UID);
     FListensCount := FListens.Count;
   finally
-    System.TMonitor.Exit(FListensLock);
+    _UnlockListens;
   end;
 
   if Assigned(FOnListenEnd) then
     FOnListenEnd(Self, AListen);
+end;
+
+function TAbstractCrossSocket.TriggerAccept(AListen: ICrossListen): Boolean;
+begin
+  Result := True;
+  if Assigned(FOnAccept) then
+   FOnAccept(Self, AListen, Result);
 end;
 
 procedure TAbstractCrossSocket.TriggerReceived(AConnection: ICrossConnection;
@@ -1273,6 +1315,36 @@ begin
   Result := UID_RAW;
 end;
 
+function TCrossData.GetUserData: Pointer;
+begin
+  Result := FUserData;
+end;
+
+function TCrossData.GetUserInterface: IInterface;
+begin
+  Result := FUserInterface;
+end;
+
+function TCrossData.GetUserObject: TObject;
+begin
+  Result := FUserObject;
+end;
+
+procedure TCrossData.SetUserData(const AValue: Pointer);
+begin
+  FUserData := AValue;
+end;
+
+procedure TCrossData.SetUserInterface(const AValue: IInterface);
+begin
+  FUserInterface := AValue;
+end;
+
+procedure TCrossData.SetUserObject(const AValue: TObject);
+begin
+  FUserObject := AValue;
+end;
+
 procedure TCrossData.UpdateAddr;
 var
   LAddr: TRawSockAddrIn;
@@ -1352,19 +1424,9 @@ begin
   _SetConnectStatus(Value);
 end;
 
-function TAbstractCrossConnection.GetUserObject: TObject;
-begin
-  Result:=FUserObject;
-end;
-
-procedure TAbstractCrossConnection.SetUserObject(const value: TObject);
-begin
-  FUserObject:=Value;
-end;
-
 function TAbstractCrossConnection.ConnectionIntf: TObject;
 begin
-  Result:=Self;
+  Result := Self;
 end;
 
 procedure TAbstractCrossConnection.Close;
@@ -1446,7 +1508,7 @@ end;
 
 procedure TAbstractCrossConnection.SendBuf(ABuffer: Pointer; ACount: Integer;
   const ACallback: TProc<ICrossConnection, Boolean>);
-{$IFDEF POSIX}
+{$IF defined(POSIX) or not defined(__LITTLE_PIECE__)}
 begin
   DirectSend(ABuffer, ACount, ACallback);
 end;
@@ -1509,12 +1571,6 @@ begin
   LSender(LConnection, True);
 end;
 {$ENDIF}
-
-procedure TAbstractCrossConnection.SendBuf(const ABuffer; ACount: Integer;
-  const ACallback: TProc<ICrossConnection, Boolean>);
-begin
-  SendBuf(@ABuffer, ACount, ACallback);
-end;
 
 procedure TAbstractCrossConnection.SendBytes(const ABytes: TBytes; AOffset,
   ACount: Integer; const ACallback: TProc<ICrossConnection, Boolean>);
@@ -1612,8 +1668,7 @@ begin
   FillChar(LAddr, SizeOf(TRawSockAddrIn), 0);
   LAddr.AddrLen := SizeOf(LAddr.Addr6);
   if (TSocketAPI.GetPeerName(FSocket, @LAddr.Addr, LAddr.AddrLen) = 0) then
-    TSocketAPI.ExtractAddrInfo(@LAddr.Addr, LAddr.AddrLen,
-      FPeerAddr, FPeerPort);
+    TSocketAPI.ExtractAddrInfo(@LAddr.Addr, LAddr.AddrLen, FPeerAddr, FPeerPort);
   {$endregion}
 end;
 

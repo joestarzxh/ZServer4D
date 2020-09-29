@@ -1,149 +1,335 @@
 { ****************************************************************************** }
 { * Low Object DB Imp library                                                  * }
+{ * https://zpascal.net                                                        * }
+{ * https://github.com/PassByYou888/zAI                                        * }
+{ * https://github.com/PassByYou888/ZServer4D                                  * }
+{ * https://github.com/PassByYou888/PascalString                               * }
+{ * https://github.com/PassByYou888/zRasterization                             * }
 { * https://github.com/PassByYou888/CoreCipher                                 * }
-(* https://github.com/PassByYou888/ZServer4D *)
+{ * https://github.com/PassByYou888/zSound                                     * }
+{ * https://github.com/PassByYou888/zChinese                                   * }
+{ * https://github.com/PassByYou888/zExpression                                * }
+{ * https://github.com/PassByYou888/zGameWare                                  * }
+{ * https://github.com/PassByYou888/zAnalysis                                  * }
+{ * https://github.com/PassByYou888/FFMPEG-Header                              * }
+{ * https://github.com/PassByYou888/zTranslate                                 * }
+{ * https://github.com/PassByYou888/InfiniteIoT                                * }
+{ * https://github.com/PassByYou888/FastMD5                                    * }
 { ****************************************************************************** }
+(*
+  update history
+  2017-12-6 performance optimization
+  2018-12-7, reliability optimization, by qq600585
+*)
 
 unit ObjectData;
 
-{$I zDefine.inc}
+{$INCLUDE zDefine.inc}
 
 interface
 
-uses UnicodeMixedLib;
-
-{$IFDEF release}
-{$DEFINE INLINE_ASM}
-{$ELSE}
-{$UNDEF INLINE_ASM}
-{$ENDIF}
-
+uses CoreClasses, UnicodeMixedLib;
 
 const
-  umlVersionLength  = 2;
-  umlTimeLength     = 8;
-  umlCountLength    = 8;
-  umlSizeLength     = 8;
-  umlPositionLength = 8;
-  umlIDLength       = 1;
-  umlPropertyLength = 4;
-  umlLevelLength    = 2;
+  DB_Version_Size = C_Word_Size;
+  DB_Time_Size = C_Double_Size;
+  DB_Counter_Size = C_Int64_Size;
+  DB_DataSize_Size = C_Int64_Size;
+  DB_Position_Size = C_Int64_Size;
+  DB_ID_Size = C_Byte_Size;
+  DB_Property_Size = C_Cardinal_Size;
+  DB_Level_Size = C_Word_Size;
+  DB_ReservedData_Size = 64;
+  DB_FixedStringL_Size = 1;
 
-  db_Pack_MajorVersion = 2;
-  db_Pack_MinorVersion = 1;
-  MaxSecursionLevel    = 128;
+  DB_MajorVersion = 2;
+  DB_MinorVersion = 3;
+  DB_Max_Secursion_Level = 128;
 
-  db_Pack_FileDescription    = 'ObjectDataV2.0';
-  db_Pack_DefaultDescription = 'Field';
+  DB_FileDescription = 'ObjectDataV2.3';
+  DB_DefaultField = 'Default-Root';
 
-  db_PathChar = '/';
+  DB_Path_Delimiter = '/';
 
-  db_String_Length  = FixedLengthStringSize + FixedLengthStringSize;
-  db_Header_Size    = (db_String_Length * 1) + (umlPositionLength * 4) + (umlTimeLength * 2) + (umlIDLength * 2) + (umlPropertyLength * 1);
-  db_Item_Size      = (db_String_Length * 1) + (umlIDLength * 1) + (umlPositionLength * 2) + (umlSizeLength * 1) + (umlCountLength * 1);
-  db_Item_BlockSize = (umlIDLength * 1) + (umlPositionLength * 4) + (umlSizeLength * 1);
-  db_Field_Size     = (db_String_Length * 1) + (umlCountLength * 1) + (umlPositionLength * 3);
-  db_Pack_Size      = (db_String_Length * 1) + (umlVersionLength * 2) + (umlTimeLength * 2) + (umlCountLength * 1) + (umlPositionLength * 4) + (umlLevelLength * 1);
+  DB_Header_Field_ID = 21;
+  DB_Header_Item_ID = 22;
 
-  db_Header_FieldID = 21;
-  db_Header_ItemID  = 22;
+  DB_Header_First = 11;
+  DB_Header_Medium = 12;
+  DB_Header_Last = 13;
+  DB_Header_1 = 14;
 
-  db_Header_FirstPositionFlags  = 11;
-  db_Header_MediumPositionFlags = 12;
-  db_Header_LastPositionFlags   = 13;
-  db_Header_OnlyPositionFlags   = 14;
+  DB_Item_1 = 33;
+  DB_Item_First = 34;
+  DB_Item_Medium = 35;
+  DB_Item_Last = 36;
 
-  db_item_OnlyPositionFlags   = 33;
-  db_item_FirstPositionFlags  = 34;
-  db_item_MediumPositionFlags = 35;
-  db_item_LastPositionFlags   = 36;
+{$REGION 'State Code'}
+  { State code }
+  DB_Header_ok = 300;
+  DB_Header_SetPosError = -301;
+  DB_Header_WritePosError = -303;
+  DB_Header_WriteNextPosError = -304;
+  DB_Header_WritePrevPosError = -305;
+  DB_Header_WritePubMainPosError = -306;
+  DB_Header_WriteIDError = -307;
+  DB_Header_WritePositionIDError = -311;
+  DB_Header_WriteNameError = -308;
+  DB_Header_WriteCreateTimeError = -309;
+  DB_Header_WriteLastEditTimeError = -310;
+  DB_Header_WriteUserPropertyIDError = -332;
+  DB_Header_ReadPosError = -321;
+  DB_Header_ReadNextPosError = -322;
+  DB_Header_ReadPrevPosError = -323;
+  DB_Header_ReadPubMainPosError = -324;
+  DB_Header_ReadIDError = -325;
+  DB_Header_ReadPositionIDError = -312;
+  DB_Header_ReadNameError = -326;
+  DB_Header_ReadCreateTimeError = -327;
+  DB_Header_ReadLastEditTimeError = -328;
+  DB_Header_ReadUserPropertyIDError = -331;
+  DB_Header_NotFindHeader = -320;
+  DB_Item_ok = 200;
+  DB_Item_SetPosError = -201;
+  DB_Item_WriteRecDescriptionError = -204;
+  DB_Item_WriteRecExterIDError = -205;
+  DB_Item_WriteFirstBlockPOSError = -206;
+  DB_Item_WriteLastBlockPOSError = -207;
+  DB_Item_WriteRecBuffSizeError = -208;
+  DB_Item_WriteBlockCountError = -209;
+  DB_Item_ReadRecDescriptionError = -214;
+  DB_Item_ReadRecExterIDError = -215;
+  DB_Item_ReadFirstBlockPOSError = -216;
+  DB_Item_ReadLastBlockPOSError = -217;
+  DB_Item_ReadRecBuffSizeError = -218;
+  DB_Item_ReadBlockCountError = -219;
+  DB_Item_WriteItemBlockIDFlagsError = -220;
+  DB_Item_WriteCurrentBlockPOSError = -221;
+  DB_Item_WriteNextBlockPOSError = -222;
+  DB_Item_WritePrevBlockPOSError = -223;
+  DB_Item_WriteDataBlockPOSError = -224;
+  DB_Item_WriteDataBuffSizeError = -225;
+  DB_Item_ReadItemBlockIDFlagsError = -230;
+  DB_Item_ReadCurrentBlockPOSError = -231;
+  DB_Item_ReadNextBlockPOSError = -232;
+  DB_Item_ReadPrevBlockPOSError = -233;
+  DB_Item_ReadDataBlockPOSError = -234;
+  DB_Item_ReadDataBuffSizeError = -235;
+  DB_Item_BlockPositionError = -240;
+  DB_Item_BlockOverrate = -241;
+  DB_Item_BlockReadError = -242;
+  DB_Item_BlockWriteError = -243;
+  DB_Field_ok = 100;
+  DB_Field_SetPosError = -101;
+  DB_Field_WriteHeaderFieldPosError = -103;
+  DB_Field_WriteDescriptionError = -104;
+  DB_Field_WriteCountError = -106;
+  DB_Field_WriteFirstPosError = -107;
+  DB_Field_WriteLastPosError = -108;
+  DB_Field_ReadHeaderFieldPosError = -110;
+  DB_Field_ReadDescriptionError = -111;
+  DB_Field_ReadCountError = -112;
+  DB_Field_ReadFirstPosError = -113;
+  DB_Field_ReadLastPosError = -114;
+  DB_Field_NotInitSearch = -121;
+  DB_Field_DeleteHeaderError = -124;
+  DB_ok = 400;
+  DB_RepOpenPackError = -401;
+  DB_CreatePackError = -402;
+  DB_WriteReservedDataError = -460;
+  DB_WriteNameError = -403;
+  DB_WriteDescriptionError = -404;
+  DB_PositionSeekError = -405;
+  DB_WriteMajorVersionError = -406;
+  DB_WriteMinorVersionError = -407;
+  DB_WriteCreateTimeError = -408;
+  DB_WriteLastEditTimeError = -409;
+  DB_WriteHeaderCountError = -410;
+  DB_WriteDefaultPositionError = -411;
+  DB_WriteFirstPositionError = -412;
+  DB_WriteLastPositionError = -413;
+  DB_WriteFixedStringLError = -462;
+  DB_ReadReservedDataError = -461;
+  DB_ReadNameError = -414;
+  DB_ReadDescriptionError = -415;
+  DB_ReadMajorVersionError = -416;
+  DB_ReadMinorVersionError = -417;
+  DB_ReadCreateTimeError = -418;
+  DB_ReadLastEditTimeError = -419;
+  DB_ReadHeaderCountError = -420;
+  DB_ReadDefaultPositionError = -421;
+  DB_ReadFirstPositionError = -422;
+  DB_ReadLastPositionError = -423;
+  DB_RepCreatePackError = -424;
+  DB_OpenPackError = -425;
+  DB_ClosePackError = -426;
+  DB_ReadFixedStringLError = -431;
+  DB_WriteCurrentPositionError = -427;
+  DB_WriteCurrentLevelError = -428;
+  DB_ReadCurrentPositionError = -429;
+  DB_ReadCurrentLevelError = -430;
+  DB_PathNameError = -440;
+  DB_RepeatCreateItemError = -450;
+  DB_OpenItemError = -451;
+  DB_ItemNameError = -452;
+  DB_RepeatOpenItemError = -453;
+  DB_CloseItemError = -454;
+  DB_ItemStructNotFindDescription = -455;
+  DB_RecursionSearchOver = -456;
+  DB_FileBufferError = -500;
+  DB_CheckIOError = -501;
+  DB_ExceptionError = -502;
+{$ENDREGION 'State Code'}
+
 
 type
   THeader = record
-    CurrentHeader, NextHeader, PrevHeader, DataMainPOS: Int64;
-    CreateTime, LastModifyTime: Double;
-    ID, PositionID: Byte;
-    UserProperty: Cardinal; // external define
-    Name: umlString;
-    Return: Integer;
+    CurrentHeader: Int64;                        // nowrite
+    NextHeader, PrevHeader, DataPosition: Int64; // store position
+    ID: Byte;                                    // DB_Header_Field_ID, DB_Header_Item_ID
+    PositionID: Byte;                            // DB_Header_First, DB_Header_Medium, DB_Header_Last, DB_Header_1
+    CreateTime, ModificationTime: Double;        // time
+    UserProperty: Cardinal;                      // external define
+    Name: U_String;                              // header name
+    State: Integer;                              // nowrite
   end;
+
+  PHeader = ^THeader;
 
   TItemBlock = record
-    IDFlags: Byte;
-    CurrentBlockPOS, NextBlockPOS, PrevBlockPOS, DataBlockPOS: Int64;
-    Size: Int64;
-    Return: Integer;
+    ID: Byte;                                                         // block ID
+    CurrentBlockPOS, NextBlockPOS, PrevBlockPOS, DataPosition: Int64; // data pos
+    Size: Int64;                                                      // block size
+    State: Integer;                                                   // nowrite
   end;
+
+  PItemBlock = ^TItemBlock;
 
   TItem = record
-    RHeader: THeader;
-    Description: umlString;
-    ExtID: Byte;
-    FirstBlockPOS, LastBlockPOS: Int64;
-    Size: Int64;
-    BlockCount: Int64;
-    CurrentBlockSeekPOS: Int64;
-    CurrentFileSeekPOS: Int64;
-    CurrentItemBlock: TItemBlock;
-    DataModify: Boolean;
-    Return: Integer;
+    RHeader: THeader;                   // header
+    Description: U_String;              // descript
+    ExtID: Byte;                        // item external ID
+    FirstBlockPOS, LastBlockPOS: Int64; // item block pos
+    Size: Int64;                        // size
+    BlockCount: Int64;                  // block count
+    CurrentBlockSeekPOS: Int64;         // nowrite
+    CurrentFileSeekPOS: Int64;          // nowrite
+    CurrentItemBlock: TItemBlock;       // nowrite
+    DataModification: Boolean;          // nowrite
+    State: Integer;                     // nowrite
   end;
+
+  PItem = ^TItem;
 
   TField = record
-    RHeader: THeader;
-    UpLevelFieldPOS: Int64;
-    Description: umlString;
-    HeaderCount: Int64;
-    FirstHeaderPOS, LastHeaderPOS: Int64;
-    Return: Integer;
+    RHeader: THeader;                     // header
+    UpFieldPOS: Int64;                    // up level field
+    Description: U_String;                // description
+    HeaderCount: Int64;                   // children
+    FirstHeaderPOS, LastHeaderPOS: Int64; // header pos
+    State: Integer;                       // nowrite
   end;
 
+  PField = ^TField;
+
+  // internal used
   TFieldSearch = record
     RHeader: THeader;
     InitFlags: Boolean;
-    Name: umlString;
-    StartPOS, OverPOS: Int64;
+    Name: U_String;
+    StartPos, OverPOS: Int64;
     ID: Byte;
     PositionID: Byte;
-    Return: Integer;
+    State: Integer;
   end;
 
-  TTMDB = record
-    FileDescription: umlString;
-    MajorVer, MinorVer: SmallInt;
-    CreateTime, LastModifyTime: Double;
-    RootHeaderCount: Int64;
-    DefaultFieldPOS, FirstHeaderPOS, LastHeaderPOS, CurrentFieldPOS: Int64;
-    CurrentFieldLevel: Word;
-    RecFile: TRecFile;
-    OverWriteItem: Boolean;
-    WriteFlags: Boolean;
-    SameItemName: Boolean;
-    Return: Integer;
+  PObjectDataHandle = ^TObjectDataHandle;
+
+  // backcall declaration
+  TObjectDataErrorProc = procedure(error: U_String) of object;
+  TObjectDataHeaderDeleteProc = procedure(fPos: Int64) of object;
+  TObjectDataHeaderWriteBeforeProc = procedure(fPos: Int64; var wVal: THeader; var Done: Boolean) of object;
+  TObjectDataHeaderWriteAfterProc = procedure(fPos: Int64; var wVal: THeader) of object;
+  TObjectDataHeaderReadProc = procedure(fPos: Int64; var rVal: THeader; var Done: Boolean) of object;
+  TObjectDataItemBlockWriteBeforeProc = procedure(fPos: Int64; var wVal: TItemBlock; var Done: Boolean) of object;
+  TObjectDataItemBlockWriteAfterProc = procedure(fPos: Int64; var wVal: TItemBlock) of object;
+  TObjectDataItemBlockReadProc = procedure(fPos: Int64; var rVal: TItemBlock; var Done: Boolean) of object;
+  TObjectDataItemWriteBeforeProc = procedure(fPos: Int64; var wVal: TItem; var Done: Boolean) of object;
+  TObjectDataItemWriteAfterProc = procedure(fPos: Int64; var wVal: TItem) of object;
+  TObjectDataItemReadProc = procedure(fPos: Int64; var rVal: TItem; var Done: Boolean) of object;
+  TObjectDataFieldWriteBeforeProc = procedure(fPos: Int64; var wVal: TField; var Done: Boolean) of object;
+  TObjectDataFieldWriteAfterProc = procedure(fPos: Int64; var wVal: TField) of object;
+  TObjectDataFieldReadProc = procedure(fPos: Int64; var rVal: TField; var Done: Boolean) of object;
+  TObjectDataTMDBWriteBeforeProc = procedure(fPos: Int64; const wVal: PObjectDataHandle; var Done: Boolean) of object;
+  TObjectDataTMDBWriteAfterProc = procedure(fPos: Int64; const wVal: PObjectDataHandle) of object;
+  TObjectDataTMDBReadProc = procedure(fPos: Int64; const rVal: PObjectDataHandle; var Done: Boolean) of object;
+
+  TObjectDataHandle = record
+
+    IOHnd: TIOHnd; // IO handle
+
+    ReservedData: array [0 .. DB_ReservedData_Size - 1] of Byte; // file: reserved struct
+    FixedStringL: Byte;                                          // file: fixed string length
+    MajorVer, MinorVer: SmallInt;                                // file: version info
+    CreateTime, ModificationTime: Double;                        // file: time
+    RootHeaderCount: Int64;                                      // file: header counter
+    DefaultFieldPOS, FirstHeaderPOS, LastHeaderPOS: Int64;       // file: field struct pos
+    CurrentFieldPOS: Int64;                                      // file: current field pos
+    CurrentFieldLevel: Word;                                     // file: current field level
+
+    OverWriteItem: Boolean;       // nowrite
+    AllowSameHeaderName: Boolean; // nowrite
+    State: Integer;               // nowrite
+
+    OnError: TObjectDataErrorProc;                                // backcall
+    OnDeleteHeader: TObjectDataHeaderDeleteProc;                  // backcall
+    OnPrepareWriteHeader: TObjectDataHeaderWriteBeforeProc;       // backcall
+    OnWriteHeader: TObjectDataHeaderWriteAfterProc;               // backcall
+    OnReadHeader: TObjectDataHeaderReadProc;                      // backcall
+    OnPrepareWriteItemBlock: TObjectDataItemBlockWriteBeforeProc; // backcall
+    OnWriteItemBlock: TObjectDataItemBlockWriteAfterProc;         // backcall
+    OnReadItemBlock: TObjectDataItemBlockReadProc;                // backcall
+    OnPrepareWriteItem: TObjectDataItemWriteBeforeProc;           // backcall
+    OnWriteItem: TObjectDataItemWriteAfterProc;                   // backcall
+    OnReadItem: TObjectDataItemReadProc;                          // backcall
+    OnPrepareOnlyWriteItemRec: TObjectDataItemWriteBeforeProc;    // backcall
+    OnOnlyWriteItemRec: TObjectDataItemWriteAfterProc;            // backcall
+    OnOnlyReadItemRec: TObjectDataItemReadProc;                   // backcall
+    OnPrepareWriteField: TObjectDataFieldWriteBeforeProc;         // backcall
+    OnWriteField: TObjectDataFieldWriteAfterProc;                 // backcall
+    OnReadField: TObjectDataFieldReadProc;                        // backcall
+    OnPrepareOnlyWriteFieldRec: TObjectDataFieldWriteBeforeProc;  // backcall
+    OnOnlyWriteFieldRec: TObjectDataFieldWriteAfterProc;          // backcall
+    OnOnlyReadFieldRec: TObjectDataFieldReadProc;                 // backcall
+    OnPrepareWriteTMDB: TObjectDataTMDBWriteBeforeProc;           // backcall
+    OnWriteTMDB: TObjectDataTMDBWriteAfterProc;                   // backcall
+    OnReadTMDB: TObjectDataTMDBReadProc;                          // backcall
   end;
 
-  TTMDBItemHandle = record
+  // runtime struct
+  TItemHandle_ = record
     Item: TItem;
-    Path: umlString;
-    Name: umlString;
-    Description: umlString;
-    CreateTime, LastModifyTime: Double;
+    Name: U_String;
+    Description: U_String;
+    CreateTime, ModificationTime: Double;
     ItemExtID: Byte;
     OpenFlags: Boolean;
   end;
 
-  TTMDBSearchHeader = record
-    Name: umlString;
+  // runtime struct
+  TSearchHeader_ = record
+    Name: U_String;
     ID: Byte;
-    CreateTime, LastModifyTime: Double;
+    CreateTime, ModificationTime: Double;
     HeaderPOS: Int64;
     CompleteCount: Int64;
     FieldSearch: TFieldSearch;
   end;
 
-  TTMDBSearchItem = record
-    Name: umlString;
-    Description: umlString;
+  // runtime struct
+  TSearchItem_ = record
+    Name: U_String;
+    Description: U_String;
     ExtID: Byte;
     Size: Int64;
     HeaderPOS: Int64;
@@ -151,1661 +337,2156 @@ type
     FieldSearch: TFieldSearch;
   end;
 
-  TTMDBSearchField = record
-    Name: umlString;
-    Description: umlString;
+  // runtime struct
+  TSearchField_ = record
+    Name: U_String;
+    Description: U_String;
     HeaderCount: Int64;
     HeaderPOS: Int64;
     CompleteCount: Int64;
     FieldSearch: TFieldSearch;
   end;
 
-  TTMDBDescriptionHandle = record
-    StructVarID: Byte;
-    StructDescription: umlString;
-    StructNextPos, StructCurrentPos, StructPublicPos: Int64;
-    StructSize: Int64;
-    StructPositionID: Byte;
-  end;
-
-  TTMDBItemStruct = record
-    Description: umlString;
-    StructCount: Int64;
-    StructFirstPos, StructLastPos, ItemStructCurrentPos: Int64;
-    DescriptionHandle: TTMDBDescriptionHandle;
-  end;
-
-  TTMDBRecursionSearch = record
+  // runtime struct
+  TRecursionSearch_ = record
     ReturnHeader: THeader;
     CurrentField: TField;
-    InitPath: umlString;
-    FilterName: umlString;
+    InitPath: U_String;
+    FilterName: U_String;
     SearchBuffGo: Integer;
-    SearchBuff: array [0 .. MaxSecursionLevel] of TFieldSearch;
+    SearchBuff: array [0 .. DB_Max_Secursion_Level] of TFieldSearch;
   end;
 
-procedure InitTHeader(var SenderHeader: THeader); inline;
-procedure InitTItemBlock(var SenderItemBlock: TItemBlock); inline;
-procedure InitTItem(var SenderItem: TItem); inline;
-procedure InitTField(var SenderField: TField); inline;
-procedure InitTFieldSearch(var SenderFieldSearch: TFieldSearch); inline;
-procedure InitTTMDB(var SenderTMDB: TTMDB); inline;
-procedure InitTTMDBItemHandle(var SenderTMDBItemHandle: TTMDBItemHandle); inline;
-procedure InitTTMDBSearchHeader(var SenderTMDBSearchHeader: TTMDBSearchHeader); inline;
-procedure InitTTMDBSearchItem(var SenderTMDBSearchItem: TTMDBSearchItem); inline;
-procedure InitTTMDBSearchField(var SenderTMDBSearchField: TTMDBSearchField); inline;
-procedure InitTTMDBDescriptionHandle(var SenderTMDBDescriptionHandle: TTMDBDescriptionHandle); inline;
-procedure InitTTMDBItemStruct(var SenderTMDBItemStruct: TTMDBItemStruct); inline;
-procedure InitTTMDBRecursionSearch(var SenderTMDBRecursionSearch: TTMDBRecursionSearch); inline;
+  // internal used
+function Get_DB_StringL(var IOHnd: TIOHnd): Integer;
+function Get_DB_HeaderL(var IOHnd: TIOHnd): Integer;
+function Get_DB_ItemL(var IOHnd: TIOHnd): Integer;
+function Get_DB_BlockL(var IOHnd: TIOHnd): Integer;
+function Get_DB_FieldL(var IOHnd: TIOHnd): Integer;
+function Get_DB_L(var IOHnd: TIOHnd): Integer;
 
-function dbHeader_WriteRec(const fPos: Int64; var RecFile: TRecFile; var SenderHeader: THeader): Boolean; inline;
-function dbHeader_ReadRec(const fPos: Int64; var RecFile: TRecFile; var SenderHeader: THeader): Boolean; inline;
-function dbItem_WriteRec(const fPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean; inline;
-function dbItem_ReadRec(const fPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean; inline;
-function dbField_WriteRec(const fPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean; inline;
-function dbField_ReadRec(const fPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean; inline;
-function dbItem_OnlyWriteItemBlockRec(const fPos: Int64; var RecFile: TRecFile; var SenderItemBlock: TItemBlock): Boolean; inline;
-function dbItem_OnlyReadItemBlockRec(const fPos: Int64; var RecFile: TRecFile; var SenderItemBlock: TItemBlock): Boolean; inline;
-function dbPack_WriteRec(const fPos: Int64; var RecFile: TRecFile; var SenderTMDB: TTMDB): Boolean; inline;
-function dbPack_ReadRec(const fPos: Int64; var RecFile: TRecFile; var SenderTMDB: TTMDB): Boolean; inline;
-function dbItem_OnlyWriteItemRec(const fPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean; inline;
-function dbItem_OnlyReadItemRec(const fPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean; inline;
-function dbField_OnlyWriteFieldRec(const fPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean; inline;
-function dbField_OnlyReadFieldRec(const fPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean; inline;
+function TranslateReturnCode(const ReturnCode: Integer): U_String;
 
-function dbHeader_MultipleMatch(const SourStr, DestStr: umlString): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: init store struct
+procedure Init_THeader(var Header_: THeader);
+procedure Init_TItemBlock(var Block_: TItemBlock);
+procedure Init_TItem(var Item_: TItem);
+procedure Init_TField(var Field_: TField);
+procedure Init_TTMDB(var DB_: TObjectDataHandle); overload;
+procedure Init_TTMDB(var DB_: TObjectDataHandle; const FixedStringL: Byte); overload;
 
-function dbHeader_FindNext(const Name: umlString; const FirstHeaderPOS, LastHeaderPOS: Int64; var RecFile: TRecFile; var SenderHeader: THeader): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbHeader_FindPrev(const Name: umlString; const LastHeaderPOS, FirstHeaderPOS: Int64; var RecFile: TRecFile; var SenderHeader: THeader): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: init runtime struct
+procedure Init_TFieldSearch(var FieldS_: TFieldSearch);
+procedure Init_TTMDBItemHandle(var ItemHnd_: TItemHandle_);
+procedure Init_TTMDBSearchHeader(var SearchHeader_: TSearchHeader_);
+procedure Init_TTMDBSearchItem(var SearchItem_: TSearchItem_);
+procedure Init_TTMDBSearchField(var SearchField_: TSearchField_);
+procedure Init_TTMDBRecursionSearch(var RecursionSearch_: TRecursionSearch_);
 
-function dbItem_BlockCreate(var RecFile: TRecFile; var SenderItem: TItem): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbItem_BlockInit(var RecFile: TRecFile; var SenderItem: TItem): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbItem_BlockReadData(var RecFile: TRecFile; var SenderItem: TItem; var Buffers; const _Size: Int64): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbItem_BlockAppendWriteData(var RecFile: TRecFile; var SenderItem: TItem; var Buffers; const Size: Int64): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbItem_BlockWriteData(var RecFile: TRecFile; var SenderItem: TItem; var Buffers; const Size: Int64): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbItem_BlockSeekPOS(var RecFile: TRecFile; var SenderItem: TItem; const Position: Int64): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbItem_BlockGetPOS(var RecFile: TRecFile; var SenderItem: TItem): Int64; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbItem_BlockSeekStartPOS(var RecFile: TRecFile; var SenderItem: TItem): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbItem_BlockSeekLastPOS(var RecFile: TRecFile; var SenderItem: TItem): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: header data struct
+function dbHeader_WriteRec(const fPos: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
+function dbHeader_ReadRec(const fPos: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
+function dbHeader_ReadReservedRec(const fPos: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
 
-function dbField_GetPOSField(const fPos: Int64; var RecFile: TRecFile): TField; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: item data struct, include header
+function dbItem_WriteRec(const fPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
+function dbItem_ReadRec(const fPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 
-function dbField_GetFirstHeader(const fPos: Int64; var RecFile: TRecFile): THeader; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_GetLastHeader(const fPos: Int64; var RecFile: TRecFile): THeader; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: field data struct, include header
+function dbField_WriteRec(const fPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
+function dbField_ReadRec(const fPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
 
-function dbField_OnlyFindFirstName(const Name: umlString; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_OnlyFindNextName(var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_OnlyFindLastName(const Name: umlString; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_OnlyFindPrevName(var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: item block struct
+function dbItem_OnlyWriteItemBlockRec(const fPos: Int64; var IOHnd: TIOHnd; var Block_: TItemBlock): Boolean;
+function dbItem_OnlyReadItemBlockRec(const fPos: Int64; var IOHnd: TIOHnd; var Block_: TItemBlock): Boolean;
 
-function dbField_FindFirst(const Name: umlString; const ID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_FindNext(var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_FindLast(const Name: umlString; const ID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_FindPrev(var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: DB struct
+function db_WriteRec(const fPos: Int64; var IOHnd: TIOHnd; var DB_: TObjectDataHandle): Boolean;
+function db_ReadRec(const fPos: Int64; var IOHnd: TIOHnd; var DB_: TObjectDataHandle): Boolean;
 
-function dbField_FindFirstItem(const Name: umlString; const ItemExtID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_FindNextItem(const ItemExtID: Byte; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_FindLastItem(const Name: umlString; const ItemExtID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_FindPrevItem(const ItemExtID: Byte; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_ExistItem(const Name: umlString; const ItemExtID: Byte; const fPos: Int64; var RecFile: TRecFile): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: item data struct, no header
+function dbItem_OnlyWriteItemRec(const fPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
+function dbItem_OnlyReadItemRec(const fPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 
-function dbField_ExistHeader(const Name: umlString; const ID: Byte; const fPos: Int64; var RecFile: TRecFile): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: field data struct, no header
+function dbField_OnlyWriteFieldRec(const fPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
+function dbField_OnlyReadFieldRec(const fPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
 
-function dbField_CreateHeader(const Name: umlString; const ID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderHeader: THeader): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_InsertNewHeader(const Name: umlString; const ID: Byte; const fieldPos, InsertHeaderPos: Int64; var RecFile: TRecFile; var NewHeader: THeader): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: string match
+function dbMultipleMatch(const SourStr, DestStr: U_String): Boolean;
 
-function dbField_DeleteHeader(const HeaderPOS, fieldPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_MoveHeader(const HeaderPOS: Int64; const SourcerFieldPOS, TargetFieldPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: find header
+function dbHeader_FindNext(const Name: U_String; const FirstHeaderPOS, LastHeaderPOS: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
+function dbHeader_FindPrev(const Name: U_String; const LastHeaderPOS, FirstHeaderPOS: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
 
-function dbField_CreateField(const Name: umlString; const fPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_InsertNewField(const Name: umlString; const fieldPos, CurrentInsertPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_CreateItem(const Name: umlString; const ExterID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_InsertNewItem(const Name: umlString; const ExterID: Byte; const fieldPos, CurrentInsertPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: item block
+function dbItem_BlockCreate(var IOHnd: TIOHnd; var Item_: TItem): Boolean;
+function dbItem_BlockInit(var IOHnd: TIOHnd; var Item_: TItem): Boolean;
+function dbItem_BlockReadData(var IOHnd: TIOHnd; var Item_: TItem; var Buffers; const _Size: Int64): Boolean;
+function dbItem_BlockAppendWriteData(var IOHnd: TIOHnd; var Item_: TItem; var Buffers; const Size: Int64): Boolean;
+function dbItem_BlockWriteData(var IOHnd: TIOHnd; var Item_: TItem; var Buffers; const Size: Int64): Boolean;
+function dbItem_BlockSeekPOS(var IOHnd: TIOHnd; var Item_: TItem; const Position: Int64): Boolean;
+function dbItem_BlockGetPOS(var IOHnd: TIOHnd; var Item_: TItem): Int64;
+function dbItem_BlockSeekStartPOS(var IOHnd: TIOHnd; var Item_: TItem): Boolean;
+function dbItem_BlockSeekLastPOS(var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 
-function dbField_CopyItem(var SenderItem: TItem; var RecFile: TRecFile; const DestFieldPos: Int64; var DestRecFile: TRecFile): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_CopyItemBuffer(var SenderItem: TItem; var RecFile: TRecFile; var DestItemHnd: TItem; var DestRecFile: TRecFile): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbField_CopyAllTo(const FilterName: umlString; const fieldPos: Int64; var RecFile: TRecFile; const DestFieldPos: Int64; var DestRecFile: TRecFile): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// internal: field and item
+function dbField_GetPOSField(const fPos: Int64; var IOHnd: TIOHnd): TField;
+function dbField_GetFirstHeader(const fPos: Int64; var IOHnd: TIOHnd): THeader;
+function dbField_GetLastHeader(const fPos: Int64; var IOHnd: TIOHnd): THeader;
+function dbField_OnlyFindFirstName(const Name: U_String; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+function dbField_OnlyFindNextName(var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+function dbField_OnlyFindLastName(const Name: U_String; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+function dbField_OnlyFindPrevName(var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+function dbField_FindFirst(const Name: U_String; const ID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+function dbField_FindNext(var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+function dbField_FindLast(const Name: U_String; const ID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+function dbField_FindPrev(var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+function dbField_FindFirstItem(const Name: U_String; const ItemExtID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch; var Item_: TItem): Boolean; overload;
+function dbField_FindNextItem(const ItemExtID: Byte; var IOHnd: TIOHnd; var FieldS_: TFieldSearch; var Item_: TItem): Boolean; overload;
+function dbField_FindLastItem(const Name: U_String; const ItemExtID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch; var Item_: TItem): Boolean; overload;
+function dbField_FindPrevItem(const ItemExtID: Byte; var IOHnd: TIOHnd; var FieldS_: TFieldSearch; var Item_: TItem): Boolean; overload;
+function dbField_FindFirstItem(const Name: U_String; const ItemExtID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean; overload;
+function dbField_FindNextItem(const ItemExtID: Byte; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean; overload;
+function dbField_FindLastItem(const Name: U_String; const ItemExtID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean; overload;
+function dbField_FindPrevItem(const ItemExtID: Byte; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean; overload;
+function dbField_ExistItem(const Name: U_String; const ItemExtID: Byte; const fPos: Int64; var IOHnd: TIOHnd): Boolean;
+function dbField_ExistHeader(const Name: U_String; const ID: Byte; const fPos: Int64; var IOHnd: TIOHnd): Boolean;
+function dbField_CreateHeader(const Name: U_String; const ID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
+function dbField_InsertNewHeader(const Name: U_String; const ID: Byte; const FieldPos, InsertHeaderPos: Int64; var IOHnd: TIOHnd; var NewHeader: THeader): Boolean;
+function dbField_DeleteHeader(const HeaderPOS, FieldPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
+function dbField_MoveHeader(const HeaderPOS: Int64; const SourcerFieldPOS, TargetFieldPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
+function dbField_CreateField(const Name: U_String; const fPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
+function dbField_InsertNewField(const Name: U_String; const FieldPos, CurrentInsertPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
+function dbField_CreateItem(const Name: U_String; const ExterID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
+function dbField_InsertNewItem(const Name: U_String; const ExterID: Byte; const FieldPos, CurrentInsertPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
+function dbField_CopyItem(var Item_: TItem; var IOHnd: TIOHnd; const DestFieldPos: Int64; var DestIOHnd: TIOHnd): Boolean;
+function dbField_CopyItemBuffer(var Item_: TItem; var IOHnd: TIOHnd; var DestItem_: TItem; var DestIOHnd: TIOHnd): Boolean;
+function dbField_CopyAllTo(const FilterName: U_String; const FieldPos: Int64; var IOHnd: TIOHnd; const DestFieldPos: Int64; var DestIOHnd: TIOHnd): Boolean;
 
-function dbPack_CreatePack(const Name, Description: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_OpenPack(const Name: umlString; var SenderTMDB: TTMDB; _OnlyRead: Boolean): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_CreateNew(const FileName: U_String; var DB_: TObjectDataHandle): Boolean;
+function db_Open(const FileName: U_String; var DB_: TObjectDataHandle; _OnlyRead: Boolean): Boolean;
+function db_CreateAsStream(stream: U_Stream; const Name, Description: U_String; var DB_: TObjectDataHandle): Boolean;
+function db_OpenAsStream(stream: U_Stream; const Name: U_String; var DB_: TObjectDataHandle; _OnlyRead: Boolean): Boolean;
+function db_ClosePack(var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_CreateAsStream(Stream: TMixedStream; const Name, Description: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_OpenAsStream(Stream: TMixedStream; const Name: umlString; var SenderTMDB: TTMDB; _OnlyRead: Boolean): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_CopyFieldTo(const FilterName: U_String; var DB_: TObjectDataHandle; const SourceFieldPos: Int64; var DestTMDB: TObjectDataHandle; const DestFieldPos: Int64): Boolean;
+function db_CopyAllTo(var DB_: TObjectDataHandle; var DestTMDB: TObjectDataHandle): Boolean;
+function db_CopyAllToDestPath(var DB_: TObjectDataHandle; var DestTMDB: TObjectDataHandle; destPath: U_String): Boolean;
 
-function dbPack_ClosePack(var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_Update(var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_CopyFieldTo(const FilterName: umlString; var SenderTMDB: TTMDB; const SourceFieldPos: Int64; var DestTMDB: TTMDB; const DestFieldPos: Int64): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_CopyAllTo(var SenderTMDB: TTMDB; var DestTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_CopyAllToDestPath(var SenderTMDB: TTMDB; var DestTMDB: TTMDB; DestPath: umlString): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_TestName(const Name: U_String): Boolean;
 
-function dbPack_Update(var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_CheckRootField(const Name: U_String; var Field_: TField; var DB_: TObjectDataHandle): Boolean;
+function db_CreateRootHeader(const Name: U_String; const ID: Byte; var DB_: TObjectDataHandle; var Header_: THeader): Boolean;
+function db_CreateRootField(const Name, Description: U_String; var DB_: TObjectDataHandle): Boolean;
+function db_CreateAndSetRootField(const Name, Description: U_String; var DB_: TObjectDataHandle): Boolean;
+function db_CreateField(const pathName, Description: U_String; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_TestNameStr(const Name: umlString): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_SetFieldName(const pathName, OriginFieldName, NewFieldName, FieldDescription: U_String; var DB_: TObjectDataHandle): Boolean;
+function db_SetItemName(const pathName, OriginItemName, NewItemName, ItemDescription: U_String; var DB_: TObjectDataHandle): Boolean;
+function db_DeleteField(const pathName, FilterName: U_String; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_AutoCheckRootField(const Name: umlString; var SenderField: TField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_CreateRootHeader(const Name: umlString; const ID: Byte; var SenderTMDB: TTMDB; var SenderHeader: THeader): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_CreateRootField(const Name, Description: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_CreateAndSetRootField(const Name, Description: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_CreateField(const PathName, Description: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_DeleteHeader(const pathName, FilterName: U_String; const ID: Byte; var DB_: TObjectDataHandle): Boolean;
+function db_MoveItem(const SourcerPathName, FilterName: U_String; const TargetPathName: U_String; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
+function db_MoveField(const SourcerPathName, FilterName: U_String; const TargetPathName: U_String; var DB_: TObjectDataHandle): Boolean;
+function db_MoveHeader(const SourcerPathName, FilterName: U_String; const TargetPathName: U_String; const HeaderID: Byte; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_SetFieldName(const PathName, OriginFieldName, NewFieldName, FieldDescription: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_SetItemName(const PathName, OriginItemName, NewItemName, ItemDescription: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_DeleteField(const PathName, FilterName: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_SetCurrentRootField(const Name: U_String; var DB_: TObjectDataHandle): Boolean;
+function db_SetCurrentField(const pathName: U_String; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_DeleteHeader(const PathName, FilterName: umlString; const ID: Byte; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_GetRootField(const Name: U_String; var Field_: TField; var DB_: TObjectDataHandle): Boolean;
+function db_GetField(const pathName: U_String; var Field_: TField; var DB_: TObjectDataHandle): Boolean;
+function db_GetPath(const FieldPos, RootFieldPos: Int64; var DB_: TObjectDataHandle; var RetPath: U_String): Boolean;
 
-function dbPack_MoveItem(const SourcerPathName, FilterName: umlString; const TargetPathName: umlString; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_NewItem(const pathName, ItemName, ItemDescription: U_String; const ItemExtID: Byte; var Item_: TItem; var DB_: TObjectDataHandle): Boolean;
+function db_DeleteItem(const pathName, FilterName: U_String; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
+function db_GetItem(const pathName, ItemName: U_String; const ItemExtID: Byte; var Item_: TItem; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_MoveField(const SourcerPathName, FilterName: umlString; const TargetPathName: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_ItemCreate(const pathName, ItemName, ItemDescription: U_String; const ItemExtID: Byte; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemFastCreate(const ItemName, ItemDescription: U_String; const fPos: Int64; const ItemExtID: Byte; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemFastInsertNew(const ItemName, ItemDescription: U_String; const FieldPos, InsertHeaderPos: Int64; const ItemExtID: Byte; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemOpen(const pathName, ItemName: U_String; const ItemExtID: Byte; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemFastOpen(const fPos: Int64; const ItemExtID: Byte; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemClose(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemUpdate(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemBodyReset(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemReName(const FieldPos: Int64; const NewItemName, NewItemDescription: U_String; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_MoveHeader(const SourcerPathName, FilterName: umlString; const TargetPathName: umlString; const HeaderID: Byte; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_ItemRead(const Size: Int64; var Buffers; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemWrite(const Size: Int64; var Buffers; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_SetCurrentRootField(const Name: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_SetCurrentField(const PathName: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_ItemSeekPos(const fPos: Int64; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemSeekStartPos(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemSeekLastPos(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+function db_ItemGetPos(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Int64;
+function db_ItemGetSize(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Int64;
+function db_AppendItemSize(var ItemHnd_: TItemHandle_; const Size: Int64; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_GetRootField(const Name: umlString; var SenderField: TField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_GetField(const PathName: umlString; var SenderField: TField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_GetPath(const fieldPos, RootFieldPos: Int64; var SenderTMDB: TTMDB; var RetPath: umlString): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_ExistsRootField(const Name: U_String; var DB_: TObjectDataHandle): Boolean;
+function db_FindFirstHeader(const pathName, FilterName: U_String; const ID: Byte; var SenderSearch: TSearchHeader_; var DB_: TObjectDataHandle): Boolean;
+function db_FindNextHeader(var SenderSearch: TSearchHeader_; var DB_: TObjectDataHandle): Boolean;
+function db_FindLastHeader(const pathName, FilterName: U_String; const ID: Byte; var SenderSearch: TSearchHeader_; var DB_: TObjectDataHandle): Boolean;
+function db_FindPrevHeader(var SenderSearch: TSearchHeader_; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_NewItem(const PathName, ItemName, ItemDescription: umlString; const ItemExtID: Byte; var SenderItem: TItem; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_FindFirstItem(const pathName, FilterName: U_String; const ItemExtID: Byte; var SenderSearch: TSearchItem_; var DB_: TObjectDataHandle): Boolean;
+function db_FindNextItem(var SenderSearch: TSearchItem_; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
+function db_FindLastItem(const pathName, FilterName: U_String; const ItemExtID: Byte; var SenderSearch: TSearchItem_; var DB_: TObjectDataHandle): Boolean;
+function db_FindPrevItem(var SenderSearch: TSearchItem_; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_DeleteItem(const PathName, FilterName: umlString; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_FastFindFirstItem(const FieldPos: Int64; const FilterName: U_String; const ItemExtID: Byte; var SenderSearch: TSearchItem_; var DB_: TObjectDataHandle): Boolean;
+function db_FastFindNextItem(var SenderSearch: TSearchItem_; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
+function db_FastFindLastItem(const FieldPos: Int64; const FilterName: U_String; const ItemExtID: Byte; var SenderSearch: TSearchItem_; var DB_: TObjectDataHandle): Boolean;
+function db_FastFindPrevItem(var SenderSearch: TSearchItem_; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_GetItem(const PathName, ItemName: umlString; const ItemExtID: Byte; var SenderItem: TItem; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_FindFirstField(const pathName, FilterName: U_String; var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
+function db_FindNextField(var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
+function db_FindLastField(const pathName, FilterName: U_String; var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
+function db_FindPrevField(var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_ItemCreate(const PathName, ItemName, ItemDescription: umlString; const ItemExtID: Byte; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemFastCreate(const ItemName, ItemDescription: umlString; const fPos: Int64; const ItemExtID: Byte; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline;
-{$ENDIF}
-function dbPack_ItemFastInsertNew(const ItemName, ItemDescription: umlString; const fieldPos, InsertHeaderPos: Int64; const ItemExtID: Byte; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-{$IFDEF INLINE_ASM}inline; {$ENDIF}
-{$IFDEF INLINE_ASM}inline;
-{$ENDIF}
-function dbPack_ItemOpen(const PathName, ItemName: umlString; const ItemExtID: Byte; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemFastOpen(const fPos: Int64; const ItemExtID: Byte; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemClose(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemUpdate(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemBodyReset(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemReName(const fieldPos: Int64; const NewItemName, NewItemDescription: umlString; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+// API
+function db_FastFindFirstField(const FieldPos: Int64; const FilterName: U_String; var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
+function db_FastFindNextField(var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
+function db_FastFindLastField(const FieldPos: Int64; const FilterName: U_String; var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
+function db_FastFindPrevField(var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
 
-function dbPack_ItemRead(const Size: Int64; var Buffers; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemWrite(const Size: Int64; var Buffers; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemReadStr(var Name: umlString; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemWriteStr(const Name: umlString; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-
-function dbPack_ItemSeekPos(const fPos: Int64; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemSeekStartPos(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemSeekLastPos(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemGetPos(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Int64; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_ItemGetSize(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Int64; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_AppendItemSize(var SenderTMDBItemHandle: TTMDBItemHandle; const Size: Int64; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-
-function dbPack_ExistsRootField(const Name: umlString; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FindFirstHeader(const PathName, FilterName: umlString; const ID: Byte; var SenderSearch: TTMDBSearchHeader; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FindNextHeader(var SenderSearch: TTMDBSearchHeader; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FindLastHeader(const PathName, FilterName: umlString; const ID: Byte; var SenderSearch: TTMDBSearchHeader; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FindPrevHeader(var SenderSearch: TTMDBSearchHeader; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-
-function dbPack_FindFirstItem(const PathName, FilterName: umlString; const ItemExtID: Byte; var SenderSearch: TTMDBSearchItem; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FindNextItem(var SenderSearch: TTMDBSearchItem; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FindLastItem(const PathName, FilterName: umlString; const ItemExtID: Byte; var SenderSearch: TTMDBSearchItem; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FindPrevItem(var SenderSearch: TTMDBSearchItem; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-
-function dbPack_FastFindFirstItem(const fieldPos: Int64; const FilterName: umlString; const ItemExtID: Byte; var SenderSearch: TTMDBSearchItem; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FastFindNextItem(var SenderSearch: TTMDBSearchItem; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FastFindLastItem(const fieldPos: Int64; const FilterName: umlString; const ItemExtID: Byte; var SenderSearch: TTMDBSearchItem; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FastFindPrevItem(var SenderSearch: TTMDBSearchItem; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-
-function dbPack_FindFirstField(const PathName, FilterName: umlString; var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FindNextField(var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FindLastField(const PathName, FilterName: umlString; var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FindPrevField(var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-
-function dbPack_FastFindFirstField(const fieldPos: Int64; const FilterName: umlString; var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FastFindNextField(var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FastFindLastField(const fieldPos: Int64; const FilterName: umlString; var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_FastFindPrevField(var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-
-function dbPack_RecursionSearchFirst(const InitPath, FilterName: umlString; var SenderRecursionSearch: TTMDBRecursionSearch; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-function dbPack_RecursionSearchNext(var SenderRecursionSearch: TTMDBRecursionSearch; var SenderTMDB: TTMDB): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
-
+// API
+function db_RecursionSearchFirst(const InitPath, FilterName: U_String; var SenderRecursionSearch: TRecursionSearch_; var DB_: TObjectDataHandle): Boolean;
+function db_RecursionSearchNext(var SenderRecursionSearch: TRecursionSearch_; var DB_: TObjectDataHandle): Boolean;
 
 var
-  TreeMDBHeaderNameMultipleCharacter: umlSystemString = '?';
-  TreeMDBHeaderNameMultipleString   : umlSystemString = '*';
-  db_FieldPathLimitChar             : umlSystemString = '/\';
+  TreeMDBHeaderNameMultipleCharacter: U_SystemString = '?';
+  TreeMDBHeaderNameMultipleString: U_SystemString = '*';
+  db_FieldPathLimitChar: U_SystemString = '/\';
 
 implementation
 
 uses PascalStrings;
 
-const
-  { return code }
-  db_Header_ok                          = 300;
-  db_Header_SetPosError                 = -301;
-  db_Header_WritePosError               = -303;
-  db_Header_WriteNextPosError           = -304;
-  db_Header_WritePrevPosError           = -305;
-  db_Header_WritePubMainPosError        = -306;
-  db_Header_WriteIDError                = -307;
-  db_Header_WritePositionIDError        = -311;
-  db_Header_WriteNameError              = -308;
-  db_Header_WriteCreateTimeError        = -309;
-  db_Header_WriteLastEditTimeError      = -310;
-  db_Header_WriteUserPropertyIDError    = -332;
-  db_Header_ReadPosError                = -321;
-  db_Header_ReadNextPosError            = -322;
-  db_Header_ReadPrevPosError            = -323;
-  db_Header_ReadPubMainPosError         = -324;
-  db_Header_ReadIDError                 = -325;
-  db_Header_ReadPositionIDError         = -312;
-  db_Header_ReadNameError               = -326;
-  db_Header_ReadCreateTimeError         = -327;
-  db_Header_ReadLastEditTimeError       = -328;
-  db_Header_ReadUserPropertyIDError     = -331;
-  db_Header_NotFindHeader               = -320;
-  db_Item_ok                            = 200;
-  db_Item_SetPosError                   = -201;
-  db_Item_WriteRecDescriptionError      = -204;
-  db_Item_WriteRecExterIDError          = -205;
-  db_Item_WriteFirstBlockPOSError       = -206;
-  db_Item_WriteLastBlockPOSError        = -207;
-  db_Item_WriteRecBuffSizeError         = -208;
-  db_Item_WriteBlockCountError          = -209;
-  db_Item_ReadRecDescriptionError       = -214;
-  db_Item_ReadRecExterIDError           = -215;
-  db_Item_ReadFirstBlockPOSError        = -216;
-  db_Item_ReadLastBlockPOSError         = -217;
-  db_Item_ReadRecBuffSizeError          = -218;
-  db_Item_ReadBlockCountError           = -219;
-  db_Item_WriteItemBlockIDFlagsError    = -220;
-  db_Item_WriteCurrentBlockPOSError     = -221;
-  db_Item_WriteNextBlockPOSError        = -222;
-  db_Item_WritePrevBlockPOSError        = -223;
-  db_Item_WriteDataBlockPOSError        = -224;
-  db_Item_WriteDataBuffSizeError        = -225;
-  db_Item_ReadItemBlockIDFlagsError     = -230;
-  db_Item_ReadCurrentBlockPOSError      = -231;
-  db_Item_ReadNextBlockPOSError         = -232;
-  db_Item_ReadPrevBlockPOSError         = -233;
-  db_Item_ReadDataBlockPOSError         = -234;
-  db_Item_ReadDataBuffSizeError         = -235;
-  db_Item_BlockPositionError            = -240;
-  db_Item_BlockOverrate                 = -241;
-  db_Item_BlockReadError                = -242;
-  db_Item_BlockWriteError               = -243;
-  db_Field_ok                           = 100;
-  db_Field_SetPosError                  = -101;
-  db_Field_WriteHeaderFieldPosError     = -103;
-  db_Field_WriteDescriptionError        = -104;
-  db_Field_WriteCountError              = -106;
-  db_Field_WriteFirstPosError           = -107;
-  db_Field_WriteLastPosError            = -108;
-  db_Field_ReadHeaderFieldPosError      = -110;
-  db_Field_ReadDescriptionError         = -111;
-  db_Field_ReadCountError               = -112;
-  db_Field_ReadFirstPosError            = -113;
-  db_Field_ReadLastPosError             = -114;
-  db_Field_NotInitSearch                = -121;
-  db_Field_DeleteHeaderError            = -124;
-  db_Pack_ok                            = 400;
-  db_Pack_RepOpenPackError              = -401;
-  db_Pack_CreatePackError               = -402;
-  db_Pack_WriteFileDescriptionNameError = -460;
-  db_Pack_WriteNameError                = -403;
-  db_Pack_WriteDescriptionError         = -404;
-  db_Pack_PositionSeekError             = -405;
-  db_Pack_WriteMajorVersionError        = -406;
-  db_Pack_WriteMinorVersionError        = -407;
-  db_Pack_WriteCreateTimeError          = -408;
-  db_Pack_WriteLastEditTimeError        = -409;
-  db_Pack_WriteHeaderCountError         = -410;
-  db_Pack_WriteDefaultPositionError     = -411;
-  db_Pack_WriteFirstPositionError       = -412;
-  db_Pack_WriteLastPositionError        = -413;
-  db_Pack_ReadFileDescriptionNameError  = -461;
-  db_Pack_ReadNameError                 = -414;
-  db_Pack_ReadDescriptionError          = -415;
-  db_Pack_ReadMajorVersionError         = -416;
-  db_Pack_ReadMinorVersionError         = -417;
-  db_Pack_ReadCreateTimeError           = -418;
-  db_Pack_ReadLastEditTimeError         = -419;
-  db_Pack_ReadHeaderCountError          = -420;
-  db_Pack_ReadDefaultPositionError      = -421;
-  db_Pack_ReadFirstPositionError        = -422;
-  db_Pack_ReadLastPositionError         = -423;
-  db_Pack_RepCreatePackError            = -424;
-  db_Pack_OpenPackError                 = -425;
-  db_Pack_ClosePackError                = -426;
-  db_Pack_WriteCurrentPositionError     = -427;
-  db_Pack_WriteCurrentLevelError        = -428;
-  db_Pack_ReadCurrentPositionError      = -429;
-  db_Pack_ReadCurrentLevelError         = -430;
-  db_Pack_PathNameError                 = -440;
-  db_Pack_RepeatCreateItemError         = -450;
-  db_Pack_OpenItemError                 = -451;
-  db_Pack_ItemNameError                 = -452;
-  db_Pack_RepeatOpenItemError           = -453;
-  db_Pack_CloseItemError                = -454;
-  db_Pack_ItemStructNotFindDescription  = -455;
-  db_Pack_RecursionSearchOver           = -456;
-  db_FileBufferError                    = -500;
+function Get_DB_StringL(var IOHnd: TIOHnd): Integer;
+begin
+  Result := IOHnd.FixedStringL;
+end;
 
-function dbPack_GetIndexStrCount(const StrName: umlString): Integer; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+function Get_DB_HeaderL(var IOHnd: TIOHnd): Integer;
+begin
+  Result := (Get_DB_StringL(IOHnd) * 1) +
+    (DB_Position_Size * 3) +
+    (DB_Time_Size * 2) +
+    (DB_ID_Size * 2) +
+    (DB_Property_Size * 1);
+end;
+
+function Get_DB_ItemL(var IOHnd: TIOHnd): Integer;
+begin
+  Result := (Get_DB_StringL(IOHnd) * 1) +
+    (DB_ID_Size * 1) +
+    (DB_Position_Size * 2) +
+    (DB_DataSize_Size * 1) +
+    (DB_Counter_Size * 1);
+end;
+
+function Get_DB_BlockL(var IOHnd: TIOHnd): Integer;
+begin
+  Result := (DB_ID_Size * 1) +
+    (DB_Position_Size * 4) +
+    (DB_DataSize_Size * 1);
+end;
+
+function Get_DB_FieldL(var IOHnd: TIOHnd): Integer;
+begin
+  Result := (Get_DB_StringL(IOHnd) * 1) +
+    (DB_Counter_Size * 1) +
+    (DB_Position_Size * 3);
+end;
+
+function Get_DB_L(var IOHnd: TIOHnd): Integer;
+begin
+  Result := (DB_ReservedData_Size * 1) +
+    (DB_FixedStringL_Size * 1) +
+    (DB_Version_Size * 2) +
+    (DB_Time_Size * 2) +
+    (DB_Counter_Size * 1) +
+    (DB_Position_Size * 4) +
+    (DB_Level_Size * 1);
+end;
+
+function TranslateReturnCode(const ReturnCode: Integer): U_String;
+begin
+  case ReturnCode of
+    DB_Header_ok: Result := 'DB_Header_ok';
+    DB_Header_SetPosError: Result := 'DB_Header_SetPosError';
+    DB_Header_WritePosError: Result := 'DB_Header_WritePosError';
+    DB_Header_WriteNextPosError: Result := 'DB_Header_WriteNextPosError';
+    DB_Header_WritePrevPosError: Result := 'DB_Header_WritePrevPosError';
+    DB_Header_WritePubMainPosError: Result := 'DB_Header_WritePubMainPosError';
+    DB_Header_WriteIDError: Result := 'DB_Header_WriteIDError';
+    DB_Header_WritePositionIDError: Result := 'DB_Header_WritePositionIDError';
+    DB_Header_WriteNameError: Result := 'DB_Header_WriteNameError';
+    DB_Header_WriteCreateTimeError: Result := 'DB_Header_WriteCreateTimeError';
+    DB_Header_WriteLastEditTimeError: Result := 'DB_Header_WriteLastEditTimeError';
+    DB_Header_WriteUserPropertyIDError: Result := 'DB_Header_WriteUserPropertyIDError';
+    DB_Header_ReadPosError: Result := 'DB_Header_ReadPosError';
+    DB_Header_ReadNextPosError: Result := 'DB_Header_ReadNextPosError';
+    DB_Header_ReadPrevPosError: Result := 'DB_Header_ReadPrevPosError';
+    DB_Header_ReadPubMainPosError: Result := 'DB_Header_ReadPubMainPosError';
+    DB_Header_ReadIDError: Result := 'DB_Header_ReadIDError';
+    DB_Header_ReadPositionIDError: Result := 'DB_Header_ReadPositionIDError';
+    DB_Header_ReadNameError: Result := 'DB_Header_ReadNameError';
+    DB_Header_ReadCreateTimeError: Result := 'DB_Header_ReadCreateTimeError';
+    DB_Header_ReadLastEditTimeError: Result := 'DB_Header_ReadLastEditTimeError';
+    DB_Header_ReadUserPropertyIDError: Result := 'DB_Header_ReadUserPropertyIDError';
+    DB_Header_NotFindHeader: Result := 'DB_Header_NotFindHeader';
+    DB_Item_ok: Result := 'DB_Item_ok';
+    DB_Item_SetPosError: Result := 'DB_Item_SetPosError';
+    DB_Item_WriteRecDescriptionError: Result := 'DB_Item_WriteRecDescriptionError';
+    DB_Item_WriteRecExterIDError: Result := 'DB_Item_WriteRecExterIDError';
+    DB_Item_WriteFirstBlockPOSError: Result := 'DB_Item_WriteFirstBlockPOSError';
+    DB_Item_WriteLastBlockPOSError: Result := 'DB_Item_WriteLastBlockPOSError';
+    DB_Item_WriteRecBuffSizeError: Result := 'DB_Item_WriteRecBuffSizeError';
+    DB_Item_WriteBlockCountError: Result := 'DB_Item_WriteBlockCountError';
+    DB_Item_ReadRecDescriptionError: Result := 'DB_Item_ReadRecDescriptionError';
+    DB_Item_ReadRecExterIDError: Result := 'DB_Item_ReadRecExterIDError';
+    DB_Item_ReadFirstBlockPOSError: Result := 'DB_Item_ReadFirstBlockPOSError';
+    DB_Item_ReadLastBlockPOSError: Result := 'DB_Item_ReadLastBlockPOSError';
+    DB_Item_ReadRecBuffSizeError: Result := 'DB_Item_ReadRecBuffSizeError';
+    DB_Item_ReadBlockCountError: Result := 'DB_Item_ReadBlockCountError';
+    DB_Item_WriteItemBlockIDFlagsError: Result := 'DB_Item_WriteItemBlockIDFlagsError';
+    DB_Item_WriteCurrentBlockPOSError: Result := 'DB_Item_WriteCurrentBlockPOSError';
+    DB_Item_WriteNextBlockPOSError: Result := 'DB_Item_WriteNextBlockPOSError';
+    DB_Item_WritePrevBlockPOSError: Result := 'DB_Item_WritePrevBlockPOSError';
+    DB_Item_WriteDataBlockPOSError: Result := 'DB_Item_WriteDataBlockPOSError';
+    DB_Item_WriteDataBuffSizeError: Result := 'DB_Item_WriteDataBuffSizeError';
+    DB_Item_ReadItemBlockIDFlagsError: Result := 'DB_Item_ReadItemBlockIDFlagsError';
+    DB_Item_ReadCurrentBlockPOSError: Result := 'DB_Item_ReadCurrentBlockPOSError';
+    DB_Item_ReadNextBlockPOSError: Result := 'DB_Item_ReadNextBlockPOSError';
+    DB_Item_ReadPrevBlockPOSError: Result := 'DB_Item_ReadPrevBlockPOSError';
+    DB_Item_ReadDataBlockPOSError: Result := 'DB_Item_ReadDataBlockPOSError';
+    DB_Item_ReadDataBuffSizeError: Result := 'DB_Item_ReadDataBuffSizeError';
+    DB_Item_BlockPositionError: Result := 'DB_Item_BlockPositionError';
+    DB_Item_BlockOverrate: Result := 'DB_Item_BlockOverrate';
+    DB_Item_BlockReadError: Result := 'DB_Item_BlockReadError';
+    DB_Item_BlockWriteError: Result := 'DB_Item_BlockWriteError';
+    DB_Field_ok: Result := 'DB_Field_ok';
+    DB_Field_SetPosError: Result := 'DB_Field_SetPosError';
+    DB_Field_WriteHeaderFieldPosError: Result := 'DB_Field_WriteHeaderFieldPosError';
+    DB_Field_WriteDescriptionError: Result := 'DB_Field_WriteDescriptionError';
+    DB_Field_WriteCountError: Result := 'DB_Field_WriteCountError';
+    DB_Field_WriteFirstPosError: Result := 'DB_Field_WriteFirstPosError';
+    DB_Field_WriteLastPosError: Result := 'DB_Field_WriteLastPosError';
+    DB_Field_ReadHeaderFieldPosError: Result := 'DB_Field_ReadHeaderFieldPosError';
+    DB_Field_ReadDescriptionError: Result := 'DB_Field_ReadDescriptionError';
+    DB_Field_ReadCountError: Result := 'DB_Field_ReadCountError';
+    DB_Field_ReadFirstPosError: Result := 'DB_Field_ReadFirstPosError';
+    DB_Field_ReadLastPosError: Result := 'DB_Field_ReadLastPosError';
+    DB_Field_NotInitSearch: Result := 'DB_Field_NotInitSearch';
+    DB_Field_DeleteHeaderError: Result := 'DB_Field_DeleteHeaderError';
+    DB_ok: Result := 'DB_ok';
+    DB_RepOpenPackError: Result := 'DB_RepOpenPackError';
+    DB_CreatePackError: Result := 'DB_CreatePackError';
+    DB_WriteReservedDataError: Result := 'DB_WriteReservedDataError';
+    DB_WriteNameError: Result := 'DB_WriteNameError';
+    DB_WriteDescriptionError: Result := 'DB_WriteDescriptionError';
+    DB_PositionSeekError: Result := 'DB_PositionSeekError';
+    DB_WriteMajorVersionError: Result := 'DB_WriteMajorVersionError';
+    DB_WriteMinorVersionError: Result := 'DB_WriteMinorVersionError';
+    DB_WriteCreateTimeError: Result := 'DB_WriteCreateTimeError';
+    DB_WriteLastEditTimeError: Result := 'DB_WriteLastEditTimeError';
+    DB_WriteHeaderCountError: Result := 'DB_WriteHeaderCountError';
+    DB_WriteDefaultPositionError: Result := 'DB_WriteDefaultPositionError';
+    DB_WriteFirstPositionError: Result := 'DB_WriteFirstPositionError';
+    DB_WriteLastPositionError: Result := 'DB_WriteLastPositionError';
+    DB_WriteFixedStringLError: Result := 'DB_WriteFixedStringLError';
+    DB_ReadReservedDataError: Result := 'DB_ReadReservedDataError';
+    DB_ReadNameError: Result := 'DB_ReadNameError';
+    DB_ReadDescriptionError: Result := 'DB_ReadDescriptionError';
+    DB_ReadMajorVersionError: Result := 'DB_ReadMajorVersionError';
+    DB_ReadMinorVersionError: Result := 'DB_ReadMinorVersionError';
+    DB_ReadCreateTimeError: Result := 'DB_ReadCreateTimeError';
+    DB_ReadLastEditTimeError: Result := 'DB_ReadLastEditTimeError';
+    DB_ReadHeaderCountError: Result := 'DB_ReadHeaderCountError';
+    DB_ReadDefaultPositionError: Result := 'DB_ReadDefaultPositionError';
+    DB_ReadFirstPositionError: Result := 'DB_ReadFirstPositionError';
+    DB_ReadLastPositionError: Result := 'DB_ReadLastPositionError';
+    DB_ReadFixedStringLError: Result := 'DB_ReadFixedStringLError';
+    DB_RepCreatePackError: Result := 'DB_RepCreatePackError';
+    DB_OpenPackError: Result := 'DB_OpenPackError';
+    DB_ClosePackError: Result := 'DB_ClosePackError';
+    DB_WriteCurrentPositionError: Result := 'DB_WriteCurrentPositionError';
+    DB_WriteCurrentLevelError: Result := 'DB_WriteCurrentLevelError';
+    DB_ReadCurrentPositionError: Result := 'DB_ReadCurrentPositionError';
+    DB_ReadCurrentLevelError: Result := 'DB_ReadCurrentLevelError';
+    DB_PathNameError: Result := 'DB_PathNameError';
+    DB_RepeatCreateItemError: Result := 'DB_RepeatCreateItemError';
+    DB_OpenItemError: Result := 'DB_OpenItemError';
+    DB_ItemNameError: Result := 'DB_ItemNameError';
+    DB_RepeatOpenItemError: Result := 'DB_RepeatOpenItemError';
+    DB_CloseItemError: Result := 'DB_CloseItemError';
+    DB_ItemStructNotFindDescription: Result := 'DB_ItemStructNotFindDescription';
+    DB_RecursionSearchOver: Result := 'DB_RecursionSearchOver';
+    DB_FileBufferError: Result := 'DB_FileBufferError';
+    DB_CheckIOError: Result := 'DB_CheckIOError';
+    DB_ExceptionError: Result := 'DB_ExceptionError';
+    else Result := 'unknow error';
+  end;
+end;
+
+function db_GetPathCount(const StrName: U_String): Integer;
 begin
   Result := umlGetIndexStrCount(StrName, db_FieldPathLimitChar);
 end;
 
-function dbPack_MaskFirstPath(const PathName: umlString): umlString; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+function db_DeleteFirstPath(const pathName: U_String): U_String;
 begin
-  Result := umlDeleteFirstStr(PathName, db_FieldPathLimitChar).Text;
+  Result := umlDeleteFirstStr(pathName, db_FieldPathLimitChar).Text;
 end;
 
-function dbPack_MaskLastPath(const PathName: umlString): umlString; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+function db_DeleteLastPath(const pathName: U_String): U_String;
 begin
-  Result := umlDeleteLastStr(PathName, db_FieldPathLimitChar).Text;
+  Result := umlDeleteLastStr(pathName, db_FieldPathLimitChar).Text;
 end;
 
-function dbPack_GetFirstPath(const PathName: umlString): umlString; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+function db_GetFirstPath(const pathName: U_String): U_String;
 begin
-  Result := umlGetFirstStr(PathName, db_FieldPathLimitChar).Text;
+  Result := umlGetFirstStr(pathName, db_FieldPathLimitChar).Text;
 end;
 
-function dbPack_GetLastPath(const PathName: umlString): umlString; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+function db_GetLastPath(const pathName: U_String): U_String;
 begin
-  Result := umlGetLastStr(PathName, db_FieldPathLimitChar).Text;
+  Result := umlGetLastStr(pathName, db_FieldPathLimitChar).Text;
 end;
 
-function dbPack_MatchStr(const SourStr, DestStr: umlString): Boolean; {$IFDEF INLINE_ASM}inline; {$ENDIF}
+procedure Init_THeader(var Header_: THeader);
 begin
-  Result := umlMultipleMatch(True, SourStr, DestStr, TreeMDBHeaderNameMultipleString, TreeMDBHeaderNameMultipleCharacter);
+  Header_.CurrentHeader := 0;
+  Header_.NextHeader := 0;
+  Header_.PrevHeader := 0;
+  Header_.DataPosition := 0;
+  Header_.CreateTime := 0;
+  Header_.ModificationTime := 0;
+  Header_.ID := 0;
+  Header_.PositionID := 0;
+  Header_.UserProperty := 0;
+  Header_.Name := '';
+  Header_.State := DB_Header_ok;
 end;
 
-procedure InitTHeader(var SenderHeader: THeader);
+procedure Init_TItemBlock(var Block_: TItemBlock);
 begin
-  SenderHeader.CurrentHeader := 0;
-  SenderHeader.NextHeader := 0;
-  SenderHeader.PrevHeader := 0;
-  SenderHeader.DataMainPOS := 0;
-  SenderHeader.CreateTime := 0;
-  SenderHeader.LastModifyTime := 0;
-  SenderHeader.ID := 0;
-  SenderHeader.PositionID := 0;
-  SenderHeader.UserProperty := 0;
-  SenderHeader.Name := '';
-  SenderHeader.Return := db_Header_ok;
+  Block_.ID := 0;
+  Block_.CurrentBlockPOS := 0;
+  Block_.NextBlockPOS := 0;
+  Block_.PrevBlockPOS := 0;
+  Block_.DataPosition := 0;
+  Block_.Size := 0;
+  Block_.State := DB_Item_ok;
 end;
 
-procedure InitTItemBlock(var SenderItemBlock: TItemBlock);
+procedure Init_TItem(var Item_: TItem);
 begin
-  SenderItemBlock.IDFlags := 0;
-  SenderItemBlock.CurrentBlockPOS := 0;
-  SenderItemBlock.NextBlockPOS := 0;
-  SenderItemBlock.PrevBlockPOS := 0;
-  SenderItemBlock.DataBlockPOS := 0;
-  SenderItemBlock.Size := 0;
-  SenderItemBlock.Return := db_Item_ok;
+  Init_THeader(Item_.RHeader);
+  Item_.Description := '';
+  Item_.ExtID := 0;
+  Item_.FirstBlockPOS := 0;
+  Item_.LastBlockPOS := 0;
+  Item_.Size := 0;
+  Item_.BlockCount := 0;
+  Item_.CurrentBlockSeekPOS := 0;
+  Item_.CurrentFileSeekPOS := 0;
+  Init_TItemBlock(Item_.CurrentItemBlock);
+  Item_.DataModification := False;
+  Item_.State := DB_Item_ok;
 end;
 
-procedure InitTItem(var SenderItem: TItem);
+procedure Init_TField(var Field_: TField);
 begin
-  InitTHeader(SenderItem.RHeader);
-  SenderItem.Description := '';
-  SenderItem.ExtID := 0;
-  SenderItem.FirstBlockPOS := 0;
-  SenderItem.LastBlockPOS := 0;
-  SenderItem.Size := 0;
-  SenderItem.BlockCount := 0;
-  SenderItem.CurrentBlockSeekPOS := 0;
-  SenderItem.CurrentFileSeekPOS := 0;
-  InitTItemBlock(SenderItem.CurrentItemBlock);
-  SenderItem.DataModify := False;
-  SenderItem.Return := db_Item_ok;
+  Field_.UpFieldPOS := 0;
+  Field_.Description := '';
+  Field_.HeaderCount := 0;
+  Field_.FirstHeaderPOS := 0;
+  Field_.LastHeaderPOS := 0;
+  Init_THeader(Field_.RHeader);
+  Field_.State := DB_Field_ok;
 end;
 
-procedure InitTField(var SenderField: TField);
+procedure Init_TTMDB(var DB_: TObjectDataHandle);
 begin
-  SenderField.UpLevelFieldPOS := 0;
-  SenderField.Description := '';
-  SenderField.HeaderCount := 0;
-  SenderField.FirstHeaderPOS := 0;
-  SenderField.LastHeaderPOS := 0;
-  InitTHeader(SenderField.RHeader);
-  SenderField.Return := db_Field_ok;
+  Init_TTMDB(DB_, 64 + 1);
 end;
 
-procedure InitTFieldSearch(var SenderFieldSearch: TFieldSearch);
+procedure Init_TTMDB(var DB_: TObjectDataHandle; const FixedStringL: Byte);
 begin
-  SenderFieldSearch.InitFlags := False;
-  SenderFieldSearch.StartPOS := 0;
-  SenderFieldSearch.OverPOS := 0;
-  SenderFieldSearch.Name := '';
-  SenderFieldSearch.ID := 0;
-  SenderFieldSearch.PositionID := 0;
-  InitTHeader(SenderFieldSearch.RHeader);
-  SenderFieldSearch.Return := db_Field_ok;
+  InitIOHnd(DB_.IOHnd);
+  DB_.IOHnd.FixedStringL := FixedStringL;
+  FillPtrByte(@DB_.ReservedData[0], DB_ReservedData_Size, 0);
+  DB_.FixedStringL := DB_.IOHnd.FixedStringL;
+  DB_.MajorVer := 0;
+  DB_.MinorVer := 0;
+  DB_.CreateTime := 0;
+  DB_.ModificationTime := 0;
+  DB_.RootHeaderCount := 0;
+  DB_.DefaultFieldPOS := 0;
+  DB_.FirstHeaderPOS := 0;
+  DB_.LastHeaderPOS := 0;
+  DB_.CurrentFieldPOS := 0;
+  DB_.CurrentFieldLevel := 0;
+  DB_.IOHnd.Data := @DB_;
+  DB_.OverWriteItem := True;
+  DB_.AllowSameHeaderName := False;
+
+  DB_.OnError := nil;
+
+  DB_.OnDeleteHeader := nil;
+
+  DB_.OnPrepareWriteHeader := nil;
+  DB_.OnWriteHeader := nil;
+  DB_.OnReadHeader := nil;
+
+  DB_.OnPrepareWriteItemBlock := nil;
+  DB_.OnWriteItemBlock := nil;
+  DB_.OnReadItemBlock := nil;
+
+  DB_.OnPrepareWriteItem := nil;
+  DB_.OnWriteItem := nil;
+  DB_.OnReadItem := nil;
+
+  DB_.OnPrepareOnlyWriteItemRec := nil;
+  DB_.OnOnlyWriteItemRec := nil;
+  DB_.OnOnlyReadItemRec := nil;
+
+  DB_.OnPrepareWriteField := nil;
+  DB_.OnWriteField := nil;
+  DB_.OnReadField := nil;
+
+  DB_.OnPrepareOnlyWriteFieldRec := nil;
+  DB_.OnOnlyWriteFieldRec := nil;
+  DB_.OnOnlyReadFieldRec := nil;
+
+  DB_.OnPrepareWriteTMDB := nil;
+  DB_.OnWriteTMDB := nil;
+  DB_.OnReadTMDB := nil;
+
+  DB_.State := DB_ok;
 end;
 
-procedure InitTTMDB(var SenderTMDB: TTMDB);
+procedure Init_TFieldSearch(var FieldS_: TFieldSearch);
 begin
-  SenderTMDB.FileDescription := '';
-  SenderTMDB.MajorVer := 0;
-  SenderTMDB.MinorVer := 0;
-  SenderTMDB.CreateTime := 0;
-  SenderTMDB.LastModifyTime := 0;
-  SenderTMDB.RootHeaderCount := 0;
-  SenderTMDB.DefaultFieldPOS := 0;
-  SenderTMDB.FirstHeaderPOS := 0;
-  SenderTMDB.LastHeaderPOS := 0;
-  SenderTMDB.CurrentFieldPOS := 0;
-  SenderTMDB.CurrentFieldLevel := 0;
-  InitTRecFile(SenderTMDB.RecFile);
-  SenderTMDB.OverWriteItem := True;
-  SenderTMDB.WriteFlags := False;
-  SenderTMDB.SameItemName := False;
-  SenderTMDB.Return := db_Pack_ok;
+  FieldS_.InitFlags := False;
+  FieldS_.StartPos := 0;
+  FieldS_.OverPOS := 0;
+  FieldS_.Name := '';
+  FieldS_.ID := 0;
+  FieldS_.PositionID := 0;
+  Init_THeader(FieldS_.RHeader);
+  FieldS_.State := DB_Field_ok;
 end;
 
-procedure InitTTMDBItemHandle(var SenderTMDBItemHandle: TTMDBItemHandle);
+procedure Init_TTMDBItemHandle(var ItemHnd_: TItemHandle_);
 begin
-  InitTItem(SenderTMDBItemHandle.Item);
-  SenderTMDBItemHandle.Path := '';
-  SenderTMDBItemHandle.Name := '';
-  SenderTMDBItemHandle.Description := '';
-  SenderTMDBItemHandle.CreateTime := 0;
-  SenderTMDBItemHandle.LastModifyTime := 0;
-  SenderTMDBItemHandle.ItemExtID := 0;
-  SenderTMDBItemHandle.OpenFlags := False;
+  Init_TItem(ItemHnd_.Item);
+  ItemHnd_.Name := '';
+  ItemHnd_.Description := '';
+  ItemHnd_.CreateTime := 0;
+  ItemHnd_.ModificationTime := 0;
+  ItemHnd_.ItemExtID := 0;
+  ItemHnd_.OpenFlags := False;
 end;
 
-procedure InitTTMDBSearchHeader(var SenderTMDBSearchHeader: TTMDBSearchHeader);
+procedure Init_TTMDBSearchHeader(var SearchHeader_: TSearchHeader_);
 begin
-  SenderTMDBSearchHeader.Name := '';
-  SenderTMDBSearchHeader.ID := 0;
-  SenderTMDBSearchHeader.CreateTime := 0;
-  SenderTMDBSearchHeader.LastModifyTime := 0;
-  SenderTMDBSearchHeader.HeaderPOS := 0;
-  SenderTMDBSearchHeader.CompleteCount := 0;
-  InitTFieldSearch(SenderTMDBSearchHeader.FieldSearch);
+  SearchHeader_.Name := '';
+  SearchHeader_.ID := 0;
+  SearchHeader_.CreateTime := 0;
+  SearchHeader_.ModificationTime := 0;
+  SearchHeader_.HeaderPOS := 0;
+  SearchHeader_.CompleteCount := 0;
+  Init_TFieldSearch(SearchHeader_.FieldSearch);
 end;
 
-procedure InitTTMDBSearchItem(var SenderTMDBSearchItem: TTMDBSearchItem);
+procedure Init_TTMDBSearchItem(var SearchItem_: TSearchItem_);
 begin
-  SenderTMDBSearchItem.Name := '';
-  SenderTMDBSearchItem.Description := '';
-  SenderTMDBSearchItem.ExtID := 0;
-  SenderTMDBSearchItem.Size := 0;
-  SenderTMDBSearchItem.HeaderPOS := 0;
-  SenderTMDBSearchItem.CompleteCount := 0;
-  InitTFieldSearch(SenderTMDBSearchItem.FieldSearch);
+  SearchItem_.Name := '';
+  SearchItem_.Description := '';
+  SearchItem_.ExtID := 0;
+  SearchItem_.Size := 0;
+  SearchItem_.HeaderPOS := 0;
+  SearchItem_.CompleteCount := 0;
+  Init_TFieldSearch(SearchItem_.FieldSearch);
 end;
 
-procedure InitTTMDBSearchField(var SenderTMDBSearchField: TTMDBSearchField);
+procedure Init_TTMDBSearchField(var SearchField_: TSearchField_);
 begin
-  SenderTMDBSearchField.Name := '';
-  SenderTMDBSearchField.Description := '';
-  SenderTMDBSearchField.HeaderCount := 0;
-  SenderTMDBSearchField.HeaderPOS := 0;
-  SenderTMDBSearchField.CompleteCount := 0;
-  InitTFieldSearch(SenderTMDBSearchField.FieldSearch);
+  SearchField_.Name := '';
+  SearchField_.Description := '';
+  SearchField_.HeaderCount := 0;
+  SearchField_.HeaderPOS := 0;
+  SearchField_.CompleteCount := 0;
+  Init_TFieldSearch(SearchField_.FieldSearch);
 end;
 
-procedure InitTTMDBDescriptionHandle(var SenderTMDBDescriptionHandle: TTMDBDescriptionHandle);
-begin
-  SenderTMDBDescriptionHandle.StructVarID := 0;
-  SenderTMDBDescriptionHandle.StructDescription := '';
-  SenderTMDBDescriptionHandle.StructNextPos := 0;
-  SenderTMDBDescriptionHandle.StructCurrentPos := 0;
-  SenderTMDBDescriptionHandle.StructPublicPos := 0;
-  SenderTMDBDescriptionHandle.StructSize := 0;
-  SenderTMDBDescriptionHandle.StructPositionID := 0;
-end;
-
-procedure InitTTMDBItemStruct(var SenderTMDBItemStruct: TTMDBItemStruct);
-begin
-  SenderTMDBItemStruct.Description := '';
-  SenderTMDBItemStruct.StructCount := 0;
-  SenderTMDBItemStruct.StructFirstPos := 0;
-  SenderTMDBItemStruct.StructLastPos := 0;
-  SenderTMDBItemStruct.ItemStructCurrentPos := 0;
-  InitTTMDBDescriptionHandle(SenderTMDBItemStruct.DescriptionHandle);
-end;
-
-procedure InitTTMDBRecursionSearch(var SenderTMDBRecursionSearch: TTMDBRecursionSearch);
+procedure Init_TTMDBRecursionSearch(var RecursionSearch_: TRecursionSearch_);
 var
-  Rep_Int: Integer;
+  i: Integer;
 begin
-  InitTHeader(SenderTMDBRecursionSearch.ReturnHeader);
-  InitTField(SenderTMDBRecursionSearch.CurrentField);
-  SenderTMDBRecursionSearch.InitPath := '';
-  SenderTMDBRecursionSearch.FilterName := '';
-  SenderTMDBRecursionSearch.SearchBuffGo := 0;
-  for Rep_Int := 0 to MaxSecursionLevel do
-      InitTFieldSearch(SenderTMDBRecursionSearch.SearchBuff[Rep_Int]);
+  Init_THeader(RecursionSearch_.ReturnHeader);
+  Init_TField(RecursionSearch_.CurrentField);
+  RecursionSearch_.InitPath := '';
+  RecursionSearch_.FilterName := '';
+  RecursionSearch_.SearchBuffGo := 0;
+  for i := 0 to DB_Max_Secursion_Level do
+      Init_TFieldSearch(RecursionSearch_.SearchBuff[i]);
 end;
 
-function dbHeader_WriteRec(const fPos: Int64; var RecFile: TRecFile; var SenderHeader: THeader): Boolean;
+function dbHeader_WriteRec(const fPos: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
 begin
-  if umlFileSeek(RecFile, fPos) = False then
-    begin
-      SenderHeader.Return := db_Header_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderHeader.NextHeader) = False then
-    begin
-      SenderHeader.Return := db_Header_WriteNextPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderHeader.PrevHeader) = False then
-    begin
-      SenderHeader.Return := db_Header_WritePrevPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderHeader.DataMainPOS) = False then
-    begin
-      SenderHeader.Return := db_Header_WritePubMainPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlTimeLength, SenderHeader.CreateTime) = False then
-    begin
-      SenderHeader.Return := db_Header_WriteCreateTimeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlTimeLength, SenderHeader.LastModifyTime) = False then
-    begin
-      SenderHeader.Return := db_Header_WriteLastEditTimeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlIDLength, SenderHeader.ID) = False then
-    begin
-      SenderHeader.Return := db_Header_WriteIDError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlIDLength, SenderHeader.PositionID) = False then
-    begin
-      SenderHeader.Return := db_Header_WritePositionIDError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPropertyLength, SenderHeader.UserProperty) = False then
-    begin
-      SenderHeader.Return := db_Header_WriteUserPropertyIDError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWriteStr(RecFile, SenderHeader.Name) = False then
-    begin
-      SenderHeader.Return := db_Header_WriteNameError;
-      Result := False;
-      Exit;
-    end;
+  Result := False;
+  Header_.State := DB_ExceptionError;
+  try
+    if (IOHnd.IsOnlyRead) or (not IOHnd.IsOpen) then
+      begin
+        Header_.State := DB_CheckIOError;
+        Result := False;
+        exit;
+      end;
 
-  SenderHeader.Return := db_Header_ok;
-  Result := True;
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnPrepareWriteHeader) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnPrepareWriteHeader(fPos, Header_, Result);
+          if Result then
+            begin
+              Header_.State := DB_Header_ok;
+              if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteHeader) then
+                  PObjectDataHandle(IOHnd.Data)^.OnWriteHeader(fPos, Header_);
+              exit;
+            end;
+        end;
+
+    if umlFileSeek(IOHnd, fPos) = False then
+      begin
+        Header_.State := DB_Header_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Header_.NextHeader) = False then
+      begin
+        Header_.State := DB_Header_WriteNextPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Header_.PrevHeader) = False then
+      begin
+        Header_.State := DB_Header_WritePrevPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Header_.DataPosition) = False then
+      begin
+        Header_.State := DB_Header_WritePubMainPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Time_Size, Header_.CreateTime) = False then
+      begin
+        Header_.State := DB_Header_WriteCreateTimeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Time_Size, Header_.ModificationTime) = False then
+      begin
+        Header_.State := DB_Header_WriteLastEditTimeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_ID_Size, Header_.ID) = False then
+      begin
+        Header_.State := DB_Header_WriteIDError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_ID_Size, Header_.PositionID) = False then
+      begin
+        Header_.State := DB_Header_WritePositionIDError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Property_Size, Header_.UserProperty) = False then
+      begin
+        Header_.State := DB_Header_WriteUserPropertyIDError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWriteFixedString(IOHnd, Header_.Name) = False then
+      begin
+        Header_.State := DB_Header_WriteNameError;
+        Result := False;
+        exit;
+      end;
+
+    Header_.State := DB_Header_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteHeader) then
+          PObjectDataHandle(IOHnd.Data)^.OnWriteHeader(fPos, Header_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Header_.State));
+  end;
 end;
 
-function dbHeader_ReadRec(const fPos: Int64; var RecFile: TRecFile; var SenderHeader: THeader): Boolean;
+function dbHeader_ReadRec(const fPos: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
 begin
-  if umlFileSeek(RecFile, fPos) = False then
-    begin
-      SenderHeader.Return := db_Header_SetPosError;
-      Result := False;
-      Exit;
-    end;
+  Result := False;
+  Header_.State := DB_ExceptionError;
+  try
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnReadHeader) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnReadHeader(fPos, Header_, Result);
+          if Result then
+              exit;
+        end;
 
-  SenderHeader.CurrentHeader := fPos;
+    if umlFileSeek(IOHnd, fPos) = False then
+      begin
+        Header_.State := DB_Header_SetPosError;
+        Result := False;
+        exit;
+      end;
 
-  if umlFileRead(RecFile, umlPositionLength, SenderHeader.NextHeader) = False then
-    begin
-      SenderHeader.Return := db_Header_ReadNextPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderHeader.PrevHeader) = False then
-    begin
-      SenderHeader.Return := db_Header_ReadPrevPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderHeader.DataMainPOS) = False then
-    begin
-      SenderHeader.Return := db_Header_ReadPubMainPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlTimeLength, SenderHeader.CreateTime) = False then
-    begin
-      SenderHeader.Return := db_Header_ReadCreateTimeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlTimeLength, SenderHeader.LastModifyTime) = False then
-    begin
-      SenderHeader.Return := db_Header_ReadLastEditTimeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlIDLength, SenderHeader.ID) = False then
-    begin
-      SenderHeader.Return := db_Header_ReadIDError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlIDLength, SenderHeader.PositionID) = False then
-    begin
-      SenderHeader.Return := db_Header_ReadPositionIDError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPropertyLength, SenderHeader.UserProperty) = False then
-    begin
-      SenderHeader.Return := db_Header_ReadUserPropertyIDError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileReadStr(RecFile, SenderHeader.Name) = False then
-    begin
-      SenderHeader.Return := db_Header_ReadNameError;
-      Result := False;
-      Exit;
-    end;
+    Header_.CurrentHeader := fPos;
 
-  SenderHeader.Return := db_Header_ok;
-  Result := True;
+    if umlFileRead(IOHnd, DB_Position_Size, Header_.NextHeader) = False then
+      begin
+        Header_.State := DB_Header_ReadNextPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Header_.PrevHeader) = False then
+      begin
+        Header_.State := DB_Header_ReadPrevPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Header_.DataPosition) = False then
+      begin
+        Header_.State := DB_Header_ReadPubMainPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Time_Size, Header_.CreateTime) = False then
+      begin
+        Header_.State := DB_Header_ReadCreateTimeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Time_Size, Header_.ModificationTime) = False then
+      begin
+        Header_.State := DB_Header_ReadLastEditTimeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_ID_Size, Header_.ID) = False then
+      begin
+        Header_.State := DB_Header_ReadIDError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_ID_Size, Header_.PositionID) = False then
+      begin
+        Header_.State := DB_Header_ReadPositionIDError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Property_Size, Header_.UserProperty) = False then
+      begin
+        Header_.State := DB_Header_ReadUserPropertyIDError;
+        Result := False;
+        exit;
+      end;
+    if umlFileReadFixedString(IOHnd, Header_.Name) = False then
+      begin
+        Header_.State := DB_Header_ReadNameError;
+        Result := False;
+        exit;
+      end;
+
+    Header_.State := DB_Header_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteHeader) then
+          PObjectDataHandle(IOHnd.Data)^.OnWriteHeader(fPos, Header_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Header_.State));
+  end;
 end;
 
-function dbItem_WriteRec(const fPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean;
+function dbHeader_ReadReservedRec(const fPos: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
+var
+  h: THeader;
 begin
-  if dbHeader_WriteRec(fPos, RecFile, SenderItem.RHeader) = False then
-    begin
-      SenderItem.Return := SenderItem.RHeader.Return;
-      Result := False;
-      Exit;
-    end;
-  if umlFileSeek(RecFile, SenderItem.RHeader.DataMainPOS) = False then
-    begin
-      SenderItem.Return := db_Item_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWriteStr(RecFile, SenderItem.Description) = False then
-    begin
-      SenderItem.Return := db_Item_WriteRecDescriptionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlIDLength, SenderItem.ExtID) = False then
-    begin
-      SenderItem.Return := db_Item_WriteRecExterIDError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderItem.FirstBlockPOS) = False then
-    begin
-      SenderItem.Return := db_Item_WriteFirstBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderItem.LastBlockPOS) = False then
-    begin
-      SenderItem.Return := db_Item_WriteLastBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlSizeLength, SenderItem.Size) = False then
-    begin
-      SenderItem.Return := db_Item_WriteRecBuffSizeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlCountLength, SenderItem.BlockCount) = False then
-    begin
-      SenderItem.Return := db_Item_WriteBlockCountError;
-      Result := False;
-      Exit;
-    end;
-  SenderItem.Return := db_Item_ok;
-  Result := True;
+  Result := dbHeader_ReadRec(fPos, IOHnd, h);
+  Header_.CurrentHeader := h.CurrentHeader;
+  Header_.NextHeader := h.NextHeader;
+  Header_.PrevHeader := h.PrevHeader;
+  Header_.DataPosition := h.DataPosition;
+  Header_.ID := h.ID;
+  Header_.PositionID := h.PositionID;
 end;
 
-function dbItem_ReadRec(const fPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean;
+function dbItem_WriteRec(const fPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 begin
-  if dbHeader_ReadRec(fPos, RecFile, SenderItem.RHeader) = False then
-    begin
-      SenderItem.Return := SenderItem.RHeader.Return;
-      Result := False;
-      Exit;
-    end;
-  if umlFileSeek(RecFile, SenderItem.RHeader.DataMainPOS) = False then
-    begin
-      SenderItem.Return := db_Item_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileReadStr(RecFile, SenderItem.Description) = False then
-    begin
-      SenderItem.Return := db_Item_ReadRecDescriptionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlIDLength, SenderItem.ExtID) = False then
-    begin
-      SenderItem.Return := db_Item_ReadRecExterIDError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderItem.FirstBlockPOS) = False then
-    begin
-      SenderItem.Return := db_Item_ReadFirstBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderItem.LastBlockPOS) = False then
-    begin
-      SenderItem.Return := db_Item_ReadLastBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlSizeLength, SenderItem.Size) = False then
-    begin
-      SenderItem.Return := db_Item_ReadRecBuffSizeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlCountLength, SenderItem.BlockCount) = False then
-    begin
-      SenderItem.Return := db_Item_ReadBlockCountError;
-      Result := False;
-      Exit;
-    end;
-  SenderItem.Return := db_Item_ok;
-  Result := True;
+  Result := False;
+  Item_.State := DB_ExceptionError;
+  try
+    if (IOHnd.IsOnlyRead) or (not IOHnd.IsOpen) then
+      begin
+        Item_.State := DB_CheckIOError;
+        Item_.RHeader.State := DB_CheckIOError;
+        Result := False;
+        exit;
+      end;
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnPrepareWriteItem) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnPrepareWriteItem(fPos, Item_, Result);
+          if Result then
+            begin
+              Item_.State := DB_Item_ok;
+              if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteItem) then
+                  PObjectDataHandle(IOHnd.Data)^.OnWriteItem(fPos, Item_);
+              exit;
+            end;
+        end;
+
+    if dbHeader_WriteRec(fPos, IOHnd, Item_.RHeader) = False then
+      begin
+        Item_.State := Item_.RHeader.State;
+        Result := False;
+        exit;
+      end;
+    if umlFileSeek(IOHnd, Item_.RHeader.DataPosition) = False then
+      begin
+        Item_.State := DB_Item_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWriteFixedString(IOHnd, Item_.Description) = False then
+      begin
+        Item_.State := DB_Item_WriteRecDescriptionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_ID_Size, Item_.ExtID) = False then
+      begin
+        Item_.State := DB_Item_WriteRecExterIDError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Item_.FirstBlockPOS) = False then
+      begin
+        Item_.State := DB_Item_WriteFirstBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Item_.LastBlockPOS) = False then
+      begin
+        Item_.State := DB_Item_WriteLastBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_DataSize_Size, Item_.Size) = False then
+      begin
+        Item_.State := DB_Item_WriteRecBuffSizeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Counter_Size, Item_.BlockCount) = False then
+      begin
+        Item_.State := DB_Item_WriteBlockCountError;
+        Result := False;
+        exit;
+      end;
+    Item_.State := DB_Item_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteItem) then
+          PObjectDataHandle(IOHnd.Data)^.OnWriteItem(fPos, Item_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Item_.State));
+  end;
 end;
 
-function dbField_WriteRec(const fPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean;
+function dbItem_ReadRec(const fPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 begin
-  if dbHeader_WriteRec(fPos, RecFile, SenderField.RHeader) = False then
-    begin
-      SenderField.Return := SenderField.RHeader.Return;
-      Result := False;
-      Exit;
-    end;
-  if umlFileSeek(RecFile, SenderField.RHeader.DataMainPOS) = False then
-    begin
-      SenderField.Return := db_Field_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderField.UpLevelFieldPOS) = False then
-    begin
-      SenderField.Return := db_Field_WriteHeaderFieldPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWriteStr(RecFile, SenderField.Description) = False then
-    begin
-      SenderField.Return := db_Field_WriteDescriptionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlCountLength, SenderField.HeaderCount) = False then
-    begin
-      SenderField.Return := db_Field_WriteCountError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderField.FirstHeaderPOS) = False then
-    begin
-      SenderField.Return := db_Field_WriteFirstPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderField.LastHeaderPOS) = False then
-    begin
-      SenderField.Return := db_Field_WriteLastPosError;
-      Result := False;
-      Exit;
-    end;
-  SenderField.Return := db_Field_ok;
-  Result := True;
+  Result := False;
+  Item_.State := DB_ExceptionError;
+  try
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnReadItem) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnReadItem(fPos, Item_, Result);
+          if Result then
+              exit;
+        end;
+
+    if dbHeader_ReadRec(fPos, IOHnd, Item_.RHeader) = False then
+      begin
+        Item_.State := Item_.RHeader.State;
+        Result := False;
+        exit;
+      end;
+    if umlFileSeek(IOHnd, Item_.RHeader.DataPosition) = False then
+      begin
+        Item_.State := DB_Item_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileReadFixedString(IOHnd, Item_.Description) = False then
+      begin
+        Item_.State := DB_Item_ReadRecDescriptionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_ID_Size, Item_.ExtID) = False then
+      begin
+        Item_.State := DB_Item_ReadRecExterIDError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Item_.FirstBlockPOS) = False then
+      begin
+        Item_.State := DB_Item_ReadFirstBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Item_.LastBlockPOS) = False then
+      begin
+        Item_.State := DB_Item_ReadLastBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_DataSize_Size, Item_.Size) = False then
+      begin
+        Item_.State := DB_Item_ReadRecBuffSizeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Counter_Size, Item_.BlockCount) = False then
+      begin
+        Item_.State := DB_Item_ReadBlockCountError;
+        Result := False;
+        exit;
+      end;
+    Item_.State := DB_Item_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteItem) then
+          PObjectDataHandle(IOHnd.Data)^.OnWriteItem(fPos, Item_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Item_.State));
+  end;
 end;
 
-function dbField_ReadRec(const fPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean;
+function dbField_WriteRec(const fPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
 begin
-  if dbHeader_ReadRec(fPos, RecFile, SenderField.RHeader) = False then
-    begin
-      SenderField.Return := SenderField.RHeader.Return;
-      Result := False;
-      Exit;
-    end;
-  if umlFileSeek(RecFile, SenderField.RHeader.DataMainPOS) = False then
-    begin
-      SenderField.Return := db_Field_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderField.UpLevelFieldPOS) = False then
-    begin
-      SenderField.Return := db_Field_ReadHeaderFieldPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileReadStr(RecFile, SenderField.Description) = False then
-    begin
-      SenderField.Return := db_Field_ReadDescriptionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlCountLength, SenderField.HeaderCount) = False then
-    begin
-      SenderField.Return := db_Field_ReadCountError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderField.FirstHeaderPOS) = False then
-    begin
-      SenderField.Return := db_Field_ReadFirstPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderField.LastHeaderPOS) = False then
-    begin
-      SenderField.Return := db_Field_ReadLastPosError;
-      Result := False;
-      Exit;
-    end;
-  SenderField.Return := db_Field_ok;
-  Result := True;
+  Result := False;
+  Field_.State := DB_ExceptionError;
+  try
+    if (IOHnd.IsOnlyRead) or (not IOHnd.IsOpen) then
+      begin
+        Field_.State := DB_CheckIOError;
+        Field_.RHeader.State := DB_CheckIOError;
+        Result := False;
+        exit;
+      end;
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnPrepareWriteField) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnPrepareWriteField(fPos, Field_, Result);
+          if Result then
+            begin
+              Field_.State := DB_Field_ok;
+              if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteField) then
+                  PObjectDataHandle(IOHnd.Data)^.OnWriteField(fPos, Field_);
+              exit;
+            end;
+        end;
+
+    if dbHeader_WriteRec(fPos, IOHnd, Field_.RHeader) = False then
+      begin
+        Field_.State := Field_.RHeader.State;
+        Result := False;
+        exit;
+      end;
+    if umlFileSeek(IOHnd, Field_.RHeader.DataPosition) = False then
+      begin
+        Field_.State := DB_Field_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Field_.UpFieldPOS) = False then
+      begin
+        Field_.State := DB_Field_WriteHeaderFieldPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWriteFixedString(IOHnd, Field_.Description) = False then
+      begin
+        Field_.State := DB_Field_WriteDescriptionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Counter_Size, Field_.HeaderCount) = False then
+      begin
+        Field_.State := DB_Field_WriteCountError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Field_.FirstHeaderPOS) = False then
+      begin
+        Field_.State := DB_Field_WriteFirstPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Field_.LastHeaderPOS) = False then
+      begin
+        Field_.State := DB_Field_WriteLastPosError;
+        Result := False;
+        exit;
+      end;
+    Field_.State := DB_Field_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteField) then
+          PObjectDataHandle(IOHnd.Data)^.OnWriteField(fPos, Field_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Field_.State));
+  end;
 end;
 
-function dbItem_OnlyWriteItemBlockRec(const fPos: Int64; var RecFile: TRecFile; var SenderItemBlock: TItemBlock): Boolean;
+function dbField_ReadRec(const fPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
 begin
-  if umlFileSeek(RecFile, fPos) = False then
-    begin
-      SenderItemBlock.Return := db_Item_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlIDLength, SenderItemBlock.IDFlags) = False then
-    begin
-      SenderItemBlock.Return := db_Item_WriteItemBlockIDFlagsError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderItemBlock.CurrentBlockPOS) = False then
-    begin
-      SenderItemBlock.Return := db_Item_WriteCurrentBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderItemBlock.NextBlockPOS) = False then
-    begin
-      SenderItemBlock.Return := db_Item_WriteNextBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderItemBlock.PrevBlockPOS) = False then
-    begin
-      SenderItemBlock.Return := db_Item_WritePrevBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderItemBlock.DataBlockPOS) = False then
-    begin
-      SenderItemBlock.Return := db_Item_WriteDataBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlSizeLength, SenderItemBlock.Size) = False then
-    begin
-      SenderItemBlock.Return := db_Item_WriteDataBuffSizeError;
-      Result := False;
-      Exit;
-    end;
-  SenderItemBlock.Return := db_Item_ok;
-  Result := True;
+  Result := False;
+  Field_.State := DB_ExceptionError;
+  try
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnReadField) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnReadField(fPos, Field_, Result);
+          if Result then
+              exit;
+        end;
+
+    if dbHeader_ReadRec(fPos, IOHnd, Field_.RHeader) = False then
+      begin
+        Field_.State := Field_.RHeader.State;
+        Result := False;
+        exit;
+      end;
+    if umlFileSeek(IOHnd, Field_.RHeader.DataPosition) = False then
+      begin
+        Field_.State := DB_Field_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Field_.UpFieldPOS) = False then
+      begin
+        Field_.State := DB_Field_ReadHeaderFieldPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileReadFixedString(IOHnd, Field_.Description) = False then
+      begin
+        Field_.State := DB_Field_ReadDescriptionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Counter_Size, Field_.HeaderCount) = False then
+      begin
+        Field_.State := DB_Field_ReadCountError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Field_.FirstHeaderPOS) = False then
+      begin
+        Field_.State := DB_Field_ReadFirstPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Field_.LastHeaderPOS) = False then
+      begin
+        Field_.State := DB_Field_ReadLastPosError;
+        Result := False;
+        exit;
+      end;
+    Field_.State := DB_Field_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteField) then
+          PObjectDataHandle(IOHnd.Data)^.OnWriteField(fPos, Field_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Field_.State));
+  end;
 end;
 
-function dbItem_OnlyReadItemBlockRec(const fPos: Int64; var RecFile: TRecFile; var SenderItemBlock: TItemBlock): Boolean;
+function dbItem_OnlyWriteItemBlockRec(const fPos: Int64; var IOHnd: TIOHnd; var Block_: TItemBlock): Boolean;
 begin
-  if umlFileSeek(RecFile, fPos) = False then
-    begin
-      SenderItemBlock.Return := db_Item_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlIDLength, SenderItemBlock.IDFlags) = False then
-    begin
-      SenderItemBlock.Return := db_Item_ReadItemBlockIDFlagsError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderItemBlock.CurrentBlockPOS) = False then
-    begin
-      SenderItemBlock.Return := db_Item_ReadCurrentBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderItemBlock.NextBlockPOS) = False then
-    begin
-      SenderItemBlock.Return := db_Item_ReadNextBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderItemBlock.PrevBlockPOS) = False then
-    begin
-      SenderItemBlock.Return := db_Item_ReadPrevBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderItemBlock.DataBlockPOS) = False then
-    begin
-      SenderItemBlock.Return := db_Item_ReadDataBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlSizeLength, SenderItemBlock.Size) = False then
-    begin
-      SenderItemBlock.Return := db_Item_ReadDataBuffSizeError;
-      Result := False;
-      Exit;
-    end;
-  SenderItemBlock.Return := db_Item_ok;
-  Result := True;
+  Result := False;
+  Block_.State := DB_ExceptionError;
+  try
+    if (IOHnd.IsOnlyRead) or (not IOHnd.IsOpen) then
+      begin
+        Block_.State := DB_CheckIOError;
+        Result := False;
+        exit;
+      end;
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnPrepareWriteItemBlock) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnPrepareWriteItemBlock(fPos, Block_, Result);
+          if Result then
+            begin
+              Block_.State := DB_Item_ok;
+              if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteItemBlock) then
+                  PObjectDataHandle(IOHnd.Data)^.OnWriteItemBlock(fPos, Block_);
+              exit;
+            end;
+        end;
+
+    if umlFileSeek(IOHnd, fPos) = False then
+      begin
+        Block_.State := DB_Item_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_ID_Size, Block_.ID) = False then
+      begin
+        Block_.State := DB_Item_WriteItemBlockIDFlagsError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Block_.CurrentBlockPOS) = False then
+      begin
+        Block_.State := DB_Item_WriteCurrentBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Block_.NextBlockPOS) = False then
+      begin
+        Block_.State := DB_Item_WriteNextBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Block_.PrevBlockPOS) = False then
+      begin
+        Block_.State := DB_Item_WritePrevBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Block_.DataPosition) = False then
+      begin
+        Block_.State := DB_Item_WriteDataBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_DataSize_Size, Block_.Size) = False then
+      begin
+        Block_.State := DB_Item_WriteDataBuffSizeError;
+        Result := False;
+        exit;
+      end;
+    Block_.State := DB_Item_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteItemBlock) then
+          PObjectDataHandle(IOHnd.Data)^.OnWriteItemBlock(fPos, Block_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Block_.State));
+  end;
 end;
 
-function dbPack_WriteRec(const fPos: Int64; var RecFile: TRecFile; var SenderTMDB: TTMDB): Boolean;
+function dbItem_OnlyReadItemBlockRec(const fPos: Int64; var IOHnd: TIOHnd; var Block_: TItemBlock): Boolean;
 begin
-  if umlFileSeek(RecFile, fPos) = False then
-    begin
-      SenderTMDB.Return := db_Pack_PositionSeekError;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.FileDescription := db_Pack_FileDescription;
-  if umlFileWriteStr(RecFile, SenderTMDB.FileDescription) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteFileDescriptionNameError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlVersionLength, SenderTMDB.MajorVer) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteMajorVersionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlVersionLength, SenderTMDB.MinorVer) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteMinorVersionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlTimeLength, SenderTMDB.CreateTime) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteCreateTimeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlTimeLength, SenderTMDB.LastModifyTime) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteLastEditTimeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlCountLength, SenderTMDB.RootHeaderCount) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteHeaderCountError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderTMDB.DefaultFieldPOS) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteDefaultPositionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderTMDB.FirstHeaderPOS) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteFirstPositionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderTMDB.LastHeaderPOS) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteLastPositionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderTMDB.CurrentFieldPOS) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteCurrentPositionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlLevelLength, SenderTMDB.CurrentFieldLevel) = False then
-    begin
-      SenderTMDB.Return := db_Pack_WriteCurrentLevelError;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
+  Result := False;
+  Block_.State := DB_ExceptionError;
+  try
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnReadItemBlock) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnReadItemBlock(fPos, Block_, Result);
+          if Result then
+              exit;
+        end;
+
+    if umlFileSeek(IOHnd, fPos) = False then
+      begin
+        Block_.State := DB_Item_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_ID_Size, Block_.ID) = False then
+      begin
+        Block_.State := DB_Item_ReadItemBlockIDFlagsError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Block_.CurrentBlockPOS) = False then
+      begin
+        Block_.State := DB_Item_ReadCurrentBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Block_.NextBlockPOS) = False then
+      begin
+        Block_.State := DB_Item_ReadNextBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Block_.PrevBlockPOS) = False then
+      begin
+        Block_.State := DB_Item_ReadPrevBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Block_.DataPosition) = False then
+      begin
+        Block_.State := DB_Item_ReadDataBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_DataSize_Size, Block_.Size) = False then
+      begin
+        Block_.State := DB_Item_ReadDataBuffSizeError;
+        Result := False;
+        exit;
+      end;
+    Block_.State := DB_Item_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteItemBlock) then
+          PObjectDataHandle(IOHnd.Data)^.OnWriteItemBlock(fPos, Block_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Block_.State));
+  end;
 end;
 
-function dbPack_ReadRec(const fPos: Int64; var RecFile: TRecFile; var SenderTMDB: TTMDB): Boolean;
+function db_WriteRec(const fPos: Int64; var IOHnd: TIOHnd; var DB_: TObjectDataHandle): Boolean;
 begin
-  if umlFileSeek(RecFile, fPos) = False then
-    begin
-      SenderTMDB.Return := db_Pack_PositionSeekError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileReadStr(RecFile, SenderTMDB.FileDescription) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadFileDescriptionNameError;
-      Result := False;
-      Exit;
-    end;
-  if SenderTMDB.FileDescription <> db_Pack_FileDescription then
-    begin
-      SenderTMDB.Return := db_Pack_ReadFileDescriptionNameError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlVersionLength, SenderTMDB.MajorVer) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadMajorVersionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlVersionLength, SenderTMDB.MinorVer) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadMinorVersionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlTimeLength, SenderTMDB.CreateTime) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadCreateTimeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlTimeLength, SenderTMDB.LastModifyTime) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadLastEditTimeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlCountLength, SenderTMDB.RootHeaderCount) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadHeaderCountError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderTMDB.DefaultFieldPOS) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadDefaultPositionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderTMDB.FirstHeaderPOS) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadFirstPositionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderTMDB.LastHeaderPOS) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadLastPositionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderTMDB.CurrentFieldPOS) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadCurrentPositionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlLevelLength, SenderTMDB.CurrentFieldLevel) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ReadCurrentLevelError;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
+  Result := False;
+  DB_.State := DB_ExceptionError;
+  try
+    if (IOHnd.IsOnlyRead) or (not IOHnd.IsOpen) then
+      begin
+        DB_.State := DB_CheckIOError;
+        Result := False;
+        exit;
+      end;
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnPrepareWriteTMDB) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnPrepareWriteTMDB(fPos, @DB_, Result);
+          if Result then
+            begin
+              DB_.State := DB_ok;
+              if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteTMDB) then
+                  PObjectDataHandle(IOHnd.Data)^.OnWriteTMDB(fPos, @DB_);
+              exit;
+            end;
+        end;
+
+    if umlFileSeek(IOHnd, fPos) = False then
+      begin
+        DB_.State := DB_PositionSeekError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_ReservedData_Size, DB_.ReservedData[0]) = False then
+      begin
+        DB_.State := DB_WriteReservedDataError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_FixedStringL_Size, DB_.FixedStringL) = False then
+      begin
+        DB_.State := DB_WriteFixedStringLError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Version_Size, DB_.MajorVer) = False then
+      begin
+        DB_.State := DB_WriteMajorVersionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Version_Size, DB_.MinorVer) = False then
+      begin
+        DB_.State := DB_WriteMinorVersionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Time_Size, DB_.CreateTime) = False then
+      begin
+        DB_.State := DB_WriteCreateTimeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Time_Size, DB_.ModificationTime) = False then
+      begin
+        DB_.State := DB_WriteLastEditTimeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Counter_Size, DB_.RootHeaderCount) = False then
+      begin
+        DB_.State := DB_WriteHeaderCountError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, DB_.DefaultFieldPOS) = False then
+      begin
+        DB_.State := DB_WriteDefaultPositionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, DB_.FirstHeaderPOS) = False then
+      begin
+        DB_.State := DB_WriteFirstPositionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, DB_.LastHeaderPOS) = False then
+      begin
+        DB_.State := DB_WriteLastPositionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, DB_.CurrentFieldPOS) = False then
+      begin
+        DB_.State := DB_WriteCurrentPositionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Level_Size, DB_.CurrentFieldLevel) = False then
+      begin
+        DB_.State := DB_WriteCurrentLevelError;
+        Result := False;
+        exit;
+      end;
+    DB_.State := DB_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnWriteTMDB) then
+          PObjectDataHandle(IOHnd.Data)^.OnWriteTMDB(fPos, @DB_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(DB_.State));
+  end;
 end;
 
-function dbItem_OnlyWriteItemRec(const fPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean;
+function db_ReadRec(const fPos: Int64; var IOHnd: TIOHnd; var DB_: TObjectDataHandle): Boolean;
 begin
-  if umlFileSeek(RecFile, fPos) = False then
-    begin
-      SenderItem.Return := db_Item_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWriteStr(RecFile, SenderItem.Description) = False then
-    begin
-      SenderItem.Return := db_Item_WriteRecDescriptionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlIDLength, SenderItem.ExtID) = False then
-    begin
-      SenderItem.Return := db_Item_WriteRecExterIDError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderItem.FirstBlockPOS) = False then
-    begin
-      SenderItem.Return := db_Item_WriteFirstBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderItem.LastBlockPOS) = False then
-    begin
-      SenderItem.Return := db_Item_WriteLastBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlSizeLength, SenderItem.Size) = False then
-    begin
-      SenderItem.Return := db_Item_WriteRecBuffSizeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlCountLength, SenderItem.BlockCount) = False then
-    begin
-      SenderItem.Return := db_Item_WriteBlockCountError;
-      Result := False;
-      Exit;
-    end;
-  SenderItem.Return := db_Item_ok;
-  Result := True;
+  Result := False;
+  DB_.State := DB_ExceptionError;
+  try
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnReadTMDB) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnReadTMDB(fPos, @DB_, Result);
+          if Result then
+            begin
+              exit;
+            end;
+        end;
+
+    if umlFileSeek(IOHnd, fPos) = False then
+      begin
+        DB_.State := DB_PositionSeekError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_ReservedData_Size, DB_.ReservedData[0]) = False then
+      begin
+        DB_.State := DB_ReadReservedDataError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_FixedStringL_Size, DB_.FixedStringL) = False then
+      begin
+        DB_.State := DB_ReadFixedStringLError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Version_Size, DB_.MajorVer) = False then
+      begin
+        DB_.State := DB_ReadMajorVersionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Version_Size, DB_.MinorVer) = False then
+      begin
+        DB_.State := DB_ReadMinorVersionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Time_Size, DB_.CreateTime) = False then
+      begin
+        DB_.State := DB_ReadCreateTimeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Time_Size, DB_.ModificationTime) = False then
+      begin
+        DB_.State := DB_ReadLastEditTimeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Counter_Size, DB_.RootHeaderCount) = False then
+      begin
+        DB_.State := DB_ReadHeaderCountError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, DB_.DefaultFieldPOS) = False then
+      begin
+        DB_.State := DB_ReadDefaultPositionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, DB_.FirstHeaderPOS) = False then
+      begin
+        DB_.State := DB_ReadFirstPositionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, DB_.LastHeaderPOS) = False then
+      begin
+        DB_.State := DB_ReadLastPositionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, DB_.CurrentFieldPOS) = False then
+      begin
+        DB_.State := DB_ReadCurrentPositionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Level_Size, DB_.CurrentFieldLevel) = False then
+      begin
+        DB_.State := DB_ReadCurrentLevelError;
+        Result := False;
+        exit;
+      end;
+    DB_.State := DB_ok;
+    Result := True;
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(DB_.State));
+  end;
 end;
 
-function dbItem_OnlyReadItemRec(const fPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean;
+function dbItem_OnlyWriteItemRec(const fPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 begin
-  if umlFileSeek(RecFile, fPos) = False then
-    begin
-      SenderItem.Return := db_Item_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileReadStr(RecFile, SenderItem.Description) = False then
-    begin
-      SenderItem.Return := db_Item_ReadRecDescriptionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlIDLength, SenderItem.ExtID) = False then
-    begin
-      SenderItem.Return := db_Item_ReadRecExterIDError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderItem.FirstBlockPOS) = False then
-    begin
-      SenderItem.Return := db_Item_ReadFirstBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderItem.LastBlockPOS) = False then
-    begin
-      SenderItem.Return := db_Item_ReadLastBlockPOSError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlSizeLength, SenderItem.Size) = False then
-    begin
-      SenderItem.Return := db_Item_ReadRecBuffSizeError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlCountLength, SenderItem.BlockCount) = False then
-    begin
-      SenderItem.Return := db_Item_ReadBlockCountError;
-      Result := False;
-      Exit;
-    end;
-  SenderItem.Return := db_Item_ok;
-  Result := True;
+  Result := False;
+  Item_.State := DB_ExceptionError;
+  try
+    if (IOHnd.IsOnlyRead) or (not IOHnd.IsOpen) then
+      begin
+        Item_.State := DB_CheckIOError;
+        Result := False;
+        exit;
+      end;
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnPrepareOnlyWriteItemRec) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnPrepareOnlyWriteItemRec(fPos, Item_, Result);
+          if Result then
+            begin
+              Item_.State := DB_Item_ok;
+              if Assigned(PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteItemRec) then
+                  PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteItemRec(fPos, Item_);
+              exit;
+            end;
+        end;
+
+    if umlFileSeek(IOHnd, fPos) = False then
+      begin
+        Item_.State := DB_Item_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWriteFixedString(IOHnd, Item_.Description) = False then
+      begin
+        Item_.State := DB_Item_WriteRecDescriptionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_ID_Size, Item_.ExtID) = False then
+      begin
+        Item_.State := DB_Item_WriteRecExterIDError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Item_.FirstBlockPOS) = False then
+      begin
+        Item_.State := DB_Item_WriteFirstBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Item_.LastBlockPOS) = False then
+      begin
+        Item_.State := DB_Item_WriteLastBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_DataSize_Size, Item_.Size) = False then
+      begin
+        Item_.State := DB_Item_WriteRecBuffSizeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Counter_Size, Item_.BlockCount) = False then
+      begin
+        Item_.State := DB_Item_WriteBlockCountError;
+        Result := False;
+        exit;
+      end;
+    Item_.State := DB_Item_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteItemRec) then
+          PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteItemRec(fPos, Item_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Item_.State));
+  end;
 end;
 
-function dbField_OnlyWriteFieldRec(const fPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean;
+function dbItem_OnlyReadItemRec(const fPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 begin
-  if umlFileSeek(RecFile, fPos) = False then
-    begin
-      SenderField.Return := db_Field_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderField.UpLevelFieldPOS) = False then
-    begin
-      SenderField.Return := db_Field_WriteHeaderFieldPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWriteStr(RecFile, SenderField.Description) = False then
-    begin
-      SenderField.Return := db_Field_WriteDescriptionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlCountLength, SenderField.HeaderCount) = False then
-    begin
-      SenderField.Return := db_Field_WriteCountError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderField.FirstHeaderPOS) = False then
-    begin
-      SenderField.Return := db_Field_WriteFirstPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileWrite(RecFile, umlPositionLength, SenderField.LastHeaderPOS) = False then
-    begin
-      SenderField.Return := db_Field_WriteLastPosError;
-      Result := False;
-      Exit;
-    end;
-  SenderField.Return := db_Field_ok;
-  Result := True;
+  Result := False;
+  Item_.State := DB_ExceptionError;
+  try
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnOnlyReadItemRec) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnOnlyReadItemRec(fPos, Item_, Result);
+          if Result then
+              exit;
+        end;
+
+    if umlFileSeek(IOHnd, fPos) = False then
+      begin
+        Item_.State := DB_Item_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileReadFixedString(IOHnd, Item_.Description) = False then
+      begin
+        Item_.State := DB_Item_ReadRecDescriptionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_ID_Size, Item_.ExtID) = False then
+      begin
+        Item_.State := DB_Item_ReadRecExterIDError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Item_.FirstBlockPOS) = False then
+      begin
+        Item_.State := DB_Item_ReadFirstBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Item_.LastBlockPOS) = False then
+      begin
+        Item_.State := DB_Item_ReadLastBlockPOSError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_DataSize_Size, Item_.Size) = False then
+      begin
+        Item_.State := DB_Item_ReadRecBuffSizeError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Counter_Size, Item_.BlockCount) = False then
+      begin
+        Item_.State := DB_Item_ReadBlockCountError;
+        Result := False;
+        exit;
+      end;
+    Item_.State := DB_Item_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteItemRec) then
+          PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteItemRec(fPos, Item_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Item_.State));
+  end;
 end;
 
-function dbField_OnlyReadFieldRec(const fPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean;
+function dbField_OnlyWriteFieldRec(const fPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
 begin
-  if umlFileSeek(RecFile, fPos) = False then
-    begin
-      SenderField.Return := db_Field_SetPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderField.UpLevelFieldPOS) = False then
-    begin
-      SenderField.Return := db_Field_ReadHeaderFieldPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileReadStr(RecFile, SenderField.Description) = False then
-    begin
-      SenderField.Return := db_Field_ReadDescriptionError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlCountLength, SenderField.HeaderCount) = False then
-    begin
-      SenderField.Return := db_Field_ReadCountError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderField.FirstHeaderPOS) = False then
-    begin
-      SenderField.Return := db_Field_ReadFirstPosError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileRead(RecFile, umlPositionLength, SenderField.LastHeaderPOS) = False then
-    begin
-      SenderField.Return := db_Field_ReadLastPosError;
-      Result := False;
-      Exit;
-    end;
-  SenderField.Return := db_Field_ok;
-  Result := True;
+  Result := False;
+  Field_.State := DB_ExceptionError;
+  try
+    if (IOHnd.IsOnlyRead) or (not IOHnd.IsOpen) then
+      begin
+        Field_.State := DB_CheckIOError;
+        Result := False;
+        exit;
+      end;
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnPrepareOnlyWriteFieldRec) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnPrepareOnlyWriteFieldRec(fPos, Field_, Result);
+          if Result then
+            begin
+              Field_.State := DB_Field_ok;
+              if Assigned(PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteFieldRec) then
+                  PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteFieldRec(fPos, Field_);
+              exit;
+            end;
+        end;
+
+    if umlFileSeek(IOHnd, fPos) = False then
+      begin
+        Field_.State := DB_Field_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Field_.UpFieldPOS) = False then
+      begin
+        Field_.State := DB_Field_WriteHeaderFieldPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWriteFixedString(IOHnd, Field_.Description) = False then
+      begin
+        Field_.State := DB_Field_WriteDescriptionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Counter_Size, Field_.HeaderCount) = False then
+      begin
+        Field_.State := DB_Field_WriteCountError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Field_.FirstHeaderPOS) = False then
+      begin
+        Field_.State := DB_Field_WriteFirstPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileWrite(IOHnd, DB_Position_Size, Field_.LastHeaderPOS) = False then
+      begin
+        Field_.State := DB_Field_WriteLastPosError;
+        Result := False;
+        exit;
+      end;
+    Field_.State := DB_Field_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteFieldRec) then
+          PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteFieldRec(fPos, Field_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Field_.State));
+  end;
 end;
 
-function dbHeader_MultipleMatch(const SourStr, DestStr: umlString): Boolean;
+function dbField_OnlyReadFieldRec(const fPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
 begin
-  Result := dbPack_MatchStr(SourStr, DestStr);
+  Result := False;
+  Field_.State := DB_ExceptionError;
+  try
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnOnlyReadFieldRec) then
+        begin
+          Result := False;
+          PObjectDataHandle(IOHnd.Data)^.OnOnlyReadFieldRec(fPos, Field_, Result);
+          if Result then
+              exit;
+        end;
+
+    if umlFileSeek(IOHnd, fPos) = False then
+      begin
+        Field_.State := DB_Field_SetPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Field_.UpFieldPOS) = False then
+      begin
+        Field_.State := DB_Field_ReadHeaderFieldPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileReadFixedString(IOHnd, Field_.Description) = False then
+      begin
+        Field_.State := DB_Field_ReadDescriptionError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Counter_Size, Field_.HeaderCount) = False then
+      begin
+        Field_.State := DB_Field_ReadCountError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Field_.FirstHeaderPOS) = False then
+      begin
+        Field_.State := DB_Field_ReadFirstPosError;
+        Result := False;
+        exit;
+      end;
+    if umlFileRead(IOHnd, DB_Position_Size, Field_.LastHeaderPOS) = False then
+      begin
+        Field_.State := DB_Field_ReadLastPosError;
+        Result := False;
+        exit;
+      end;
+    Field_.State := DB_Field_ok;
+    Result := True;
+
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteFieldRec) then
+          PObjectDataHandle(IOHnd.Data)^.OnOnlyWriteFieldRec(fPos, Field_);
+  finally
+    if not Result then
+      if IOHnd.Data <> nil then
+        if Assigned(PObjectDataHandle(IOHnd.Data)^.OnError) then
+            PObjectDataHandle(IOHnd.Data)^.OnError(TranslateReturnCode(Field_.State));
+  end;
 end;
 
-function dbHeader_FindNext(const Name: umlString; const FirstHeaderPOS, LastHeaderPOS: Int64; var RecFile: TRecFile; var SenderHeader: THeader): Boolean;
+function dbMultipleMatch(const SourStr, DestStr: U_String): Boolean;
 begin
-  if dbHeader_ReadRec(FirstHeaderPOS, RecFile, SenderHeader) = False then
+  if SourStr.Len = 0 then
+      Result := True
+  else if DestStr.Len = 0 then
+      Result := False
+  else
+      Result := umlMultipleMatch(True, SourStr, DestStr, TreeMDBHeaderNameMultipleString, TreeMDBHeaderNameMultipleCharacter);
+end;
+
+function dbHeader_FindNext(const Name: U_String; const FirstHeaderPOS, LastHeaderPOS: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
+begin
+  if dbHeader_ReadRec(FirstHeaderPOS, IOHnd, Header_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_MultipleMatch(name, SenderHeader.Name) = True then
+  if dbMultipleMatch(Name, Header_.Name) then
     begin
       Result := True;
-      Exit;
+      exit;
     end;
-  if (SenderHeader.PositionID = db_Header_LastPositionFlags) or (SenderHeader.PositionID = db_Header_OnlyPositionFlags) then
+  if (Header_.PositionID = DB_Header_Last) or (Header_.PositionID = DB_Header_1) then
     begin
-      SenderHeader.Return := db_Header_NotFindHeader;
+      Header_.State := DB_Header_NotFindHeader;
       Result := False;
-      Exit;
+      exit;
     end;
-  while dbHeader_ReadRec(SenderHeader.NextHeader, RecFile, SenderHeader) = True do
+  while dbHeader_ReadRec(Header_.NextHeader, IOHnd, Header_) do
     begin
-      if dbHeader_MultipleMatch(name, SenderHeader.Name) = True then
+      if dbMultipleMatch(Name, Header_.Name) then
         begin
           Result := True;
-          Exit;
+          exit;
         end;
-      if SenderHeader.PositionID = db_Header_LastPositionFlags then
+      if Header_.PositionID = DB_Header_Last then
         begin
-          SenderHeader.Return := db_Header_NotFindHeader;
+          Header_.State := DB_Header_NotFindHeader;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderHeader.Return := db_Header_ok;
+  Header_.State := DB_Header_ok;
   Result := False;
 end;
 
-function dbHeader_FindPrev(const Name: umlString; const LastHeaderPOS, FirstHeaderPOS: Int64; var RecFile: TRecFile; var SenderHeader: THeader): Boolean;
+function dbHeader_FindPrev(const Name: U_String; const LastHeaderPOS, FirstHeaderPOS: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
 begin
-  if dbHeader_ReadRec(LastHeaderPOS, RecFile, SenderHeader) = False then
+  if dbHeader_ReadRec(LastHeaderPOS, IOHnd, Header_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_MultipleMatch(name, SenderHeader.Name) = True then
+  if dbMultipleMatch(Name, Header_.Name) then
     begin
       Result := True;
-      Exit;
+      exit;
     end;
-  if (SenderHeader.PositionID = db_Header_FirstPositionFlags) or (SenderHeader.PositionID = db_Header_OnlyPositionFlags) then
+  if (Header_.PositionID = DB_Header_First) or (Header_.PositionID = DB_Header_1) then
     begin
-      SenderHeader.Return := db_Header_NotFindHeader;
+      Header_.State := DB_Header_NotFindHeader;
       Result := False;
-      Exit;
+      exit;
     end;
-  while dbHeader_ReadRec(SenderHeader.PrevHeader, RecFile, SenderHeader) = True do
+  while dbHeader_ReadRec(Header_.PrevHeader, IOHnd, Header_) do
     begin
-      if dbHeader_MultipleMatch(name, SenderHeader.Name) = True then
+      if dbMultipleMatch(Name, Header_.Name) then
         begin
           Result := True;
-          Exit;
+          exit;
         end;
-      if SenderHeader.PositionID = db_Header_FirstPositionFlags then
+      if Header_.PositionID = DB_Header_First then
         begin
-          SenderHeader.Return := db_Header_NotFindHeader;
+          Header_.State := DB_Header_NotFindHeader;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderHeader.Return := db_Header_ok;
+  Header_.State := DB_Header_ok;
   Result := False;
 end;
 
-function dbItem_BlockCreate(var RecFile: TRecFile; var SenderItem: TItem): Boolean;
+function dbItem_BlockCreate(var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 var
   FirstItemBlock, LastItemBlock: TItemBlock;
 begin
-  case SenderItem.BlockCount of
+  case Item_.BlockCount of
     0:
       begin
-        LastItemBlock.IDFlags := db_item_OnlyPositionFlags;
-        LastItemBlock.CurrentBlockPOS := umlFileGetSize(RecFile);
+        LastItemBlock.ID := DB_Item_1;
+        LastItemBlock.CurrentBlockPOS := umlFileGetSize(IOHnd);
         LastItemBlock.NextBlockPOS := LastItemBlock.CurrentBlockPOS;
         LastItemBlock.PrevBlockPOS := LastItemBlock.CurrentBlockPOS;
-        LastItemBlock.DataBlockPOS := LastItemBlock.CurrentBlockPOS + db_Item_BlockSize;
+        LastItemBlock.DataPosition := LastItemBlock.CurrentBlockPOS + Get_DB_BlockL(IOHnd);
         LastItemBlock.Size := 0;
-        if dbItem_OnlyWriteItemBlockRec(LastItemBlock.CurrentBlockPOS, RecFile, LastItemBlock) = False then
+        if dbItem_OnlyWriteItemBlockRec(LastItemBlock.CurrentBlockPOS, IOHnd, LastItemBlock) = False then
           begin
-            SenderItem.Return := LastItemBlock.Return;
+            Item_.State := LastItemBlock.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        SenderItem.BlockCount := 1;
-        SenderItem.FirstBlockPOS := LastItemBlock.CurrentBlockPOS;
-        SenderItem.LastBlockPOS := LastItemBlock.CurrentBlockPOS;
-        if dbItem_OnlyWriteItemRec(SenderItem.RHeader.DataMainPOS, RecFile, SenderItem) = False then
+        Item_.BlockCount := 1;
+        Item_.FirstBlockPOS := LastItemBlock.CurrentBlockPOS;
+        Item_.LastBlockPOS := LastItemBlock.CurrentBlockPOS;
+        if dbItem_OnlyWriteItemRec(Item_.RHeader.DataPosition, IOHnd, Item_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
       end;
     1:
       begin
-        if dbItem_OnlyReadItemBlockRec(SenderItem.FirstBlockPOS, RecFile, FirstItemBlock) = False then
+        if dbItem_OnlyReadItemBlockRec(Item_.FirstBlockPOS, IOHnd, FirstItemBlock) = False then
           begin
-            SenderItem.Return := FirstItemBlock.Return;
+            Item_.State := FirstItemBlock.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        LastItemBlock.IDFlags := db_item_LastPositionFlags;
-        LastItemBlock.CurrentBlockPOS := umlFileGetSize(RecFile);
+        LastItemBlock.ID := DB_Item_Last;
+        LastItemBlock.CurrentBlockPOS := umlFileGetSize(IOHnd);
         LastItemBlock.NextBlockPOS := FirstItemBlock.CurrentBlockPOS;
         LastItemBlock.PrevBlockPOS := FirstItemBlock.CurrentBlockPOS;
-        LastItemBlock.DataBlockPOS := LastItemBlock.CurrentBlockPOS + db_Item_BlockSize;
+        LastItemBlock.DataPosition := LastItemBlock.CurrentBlockPOS + Get_DB_BlockL(IOHnd);
         LastItemBlock.Size := 0;
-        if dbItem_OnlyWriteItemBlockRec(LastItemBlock.CurrentBlockPOS, RecFile, LastItemBlock) = False then
+        if dbItem_OnlyWriteItemBlockRec(LastItemBlock.CurrentBlockPOS, IOHnd, LastItemBlock) = False then
           begin
-            SenderItem.Return := LastItemBlock.Return;
+            Item_.State := LastItemBlock.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        FirstItemBlock.IDFlags := db_item_FirstPositionFlags;
+        FirstItemBlock.ID := DB_Item_First;
         FirstItemBlock.NextBlockPOS := LastItemBlock.CurrentBlockPOS;
         FirstItemBlock.PrevBlockPOS := LastItemBlock.CurrentBlockPOS;
-        if dbItem_OnlyWriteItemBlockRec(SenderItem.FirstBlockPOS, RecFile, FirstItemBlock) = False then
+        if dbItem_OnlyWriteItemBlockRec(Item_.FirstBlockPOS, IOHnd, FirstItemBlock) = False then
           begin
-            SenderItem.Return := FirstItemBlock.Return;
+            Item_.State := FirstItemBlock.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        SenderItem.BlockCount := SenderItem.BlockCount + 1;
-        SenderItem.LastBlockPOS := LastItemBlock.CurrentBlockPOS;
-        if dbItem_OnlyWriteItemRec(SenderItem.RHeader.DataMainPOS, RecFile, SenderItem) = False then
+        Item_.BlockCount := Item_.BlockCount + 1;
+        Item_.LastBlockPOS := LastItemBlock.CurrentBlockPOS;
+        if dbItem_OnlyWriteItemRec(Item_.RHeader.DataPosition, IOHnd, Item_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
       end;
     else
       begin
-        if dbItem_OnlyReadItemBlockRec(SenderItem.FirstBlockPOS, RecFile, FirstItemBlock) = False then
+        if dbItem_OnlyReadItemBlockRec(Item_.FirstBlockPOS, IOHnd, FirstItemBlock) = False then
           begin
-            SenderItem.Return := FirstItemBlock.Return;
+            Item_.State := FirstItemBlock.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        FirstItemBlock.PrevBlockPOS := umlFileGetSize(RecFile);
-        if dbItem_OnlyWriteItemBlockRec(SenderItem.FirstBlockPOS, RecFile, FirstItemBlock) = False then
+        FirstItemBlock.PrevBlockPOS := umlFileGetSize(IOHnd);
+        if dbItem_OnlyWriteItemBlockRec(Item_.FirstBlockPOS, IOHnd, FirstItemBlock) = False then
           begin
-            SenderItem.Return := FirstItemBlock.Return;
+            Item_.State := FirstItemBlock.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        if dbItem_OnlyReadItemBlockRec(SenderItem.LastBlockPOS, RecFile, LastItemBlock) = False then
+        if dbItem_OnlyReadItemBlockRec(Item_.LastBlockPOS, IOHnd, LastItemBlock) = False then
           begin
-            SenderItem.Return := LastItemBlock.Return;
+            Item_.State := LastItemBlock.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        LastItemBlock.IDFlags := db_item_MediumPositionFlags;
+        LastItemBlock.ID := DB_Item_Medium;
         LastItemBlock.NextBlockPOS := FirstItemBlock.PrevBlockPOS;
-        if dbItem_OnlyWriteItemBlockRec(SenderItem.LastBlockPOS, RecFile, LastItemBlock) = False then
+        if dbItem_OnlyWriteItemBlockRec(Item_.LastBlockPOS, IOHnd, LastItemBlock) = False then
           begin
-            SenderItem.Return := LastItemBlock.Return;
+            Item_.State := LastItemBlock.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        LastItemBlock.IDFlags := db_item_LastPositionFlags;
+        LastItemBlock.ID := DB_Item_Last;
         LastItemBlock.CurrentBlockPOS := FirstItemBlock.PrevBlockPOS;
-        LastItemBlock.NextBlockPOS := SenderItem.FirstBlockPOS;
-        LastItemBlock.PrevBlockPOS := SenderItem.LastBlockPOS;
-        LastItemBlock.DataBlockPOS := LastItemBlock.CurrentBlockPOS + db_Item_BlockSize;
+        LastItemBlock.NextBlockPOS := Item_.FirstBlockPOS;
+        LastItemBlock.PrevBlockPOS := Item_.LastBlockPOS;
+        LastItemBlock.DataPosition := LastItemBlock.CurrentBlockPOS + Get_DB_BlockL(IOHnd);
         LastItemBlock.Size := 0;
-        if dbItem_OnlyWriteItemBlockRec(LastItemBlock.CurrentBlockPOS, RecFile, LastItemBlock) = False then
+        if dbItem_OnlyWriteItemBlockRec(LastItemBlock.CurrentBlockPOS, IOHnd, LastItemBlock) = False then
           begin
-            SenderItem.Return := LastItemBlock.Return;
+            Item_.State := LastItemBlock.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        SenderItem.BlockCount := SenderItem.BlockCount + 1;
-        SenderItem.LastBlockPOS := LastItemBlock.CurrentBlockPOS;
-        if dbItem_OnlyWriteItemRec(SenderItem.RHeader.DataMainPOS, RecFile, SenderItem) = False then
+        Item_.BlockCount := Item_.BlockCount + 1;
+        Item_.LastBlockPOS := LastItemBlock.CurrentBlockPOS;
+        if dbItem_OnlyWriteItemRec(Item_.RHeader.DataPosition, IOHnd, Item_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
       end;
   end;
-  SenderItem.CurrentItemBlock := LastItemBlock;
-  SenderItem.CurrentBlockSeekPOS := 0;
-  SenderItem.CurrentFileSeekPOS := SenderItem.CurrentItemBlock.DataBlockPOS;
-  SenderItem.DataModify := True;
-  SenderItem.Return := db_Item_ok;
+  Item_.CurrentItemBlock := LastItemBlock;
+  Item_.CurrentBlockSeekPOS := 0;
+  Item_.CurrentFileSeekPOS := Item_.CurrentItemBlock.DataPosition;
+  Item_.DataModification := True;
+  Item_.State := DB_Item_ok;
   Result := True;
 end;
 
-function dbItem_BlockInit(var RecFile: TRecFile; var SenderItem: TItem): Boolean;
+function dbItem_BlockInit(var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 begin
-  if SenderItem.BlockCount = 0 then
+  if Item_.BlockCount = 0 then
     begin
-      SenderItem.Return := db_Item_ok;
+      Item_.State := DB_Item_ok;
       Result := True;
-      Exit;
+      exit;
     end;
-  if dbItem_OnlyReadItemBlockRec(SenderItem.FirstBlockPOS, RecFile, SenderItem.CurrentItemBlock) = False then
+  if dbItem_OnlyReadItemBlockRec(Item_.FirstBlockPOS, IOHnd, Item_.CurrentItemBlock) = False then
     begin
-      SenderItem.Return := SenderItem.CurrentItemBlock.Return;
+      Item_.State := Item_.CurrentItemBlock.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderItem.CurrentBlockSeekPOS := 0;
-  SenderItem.CurrentFileSeekPOS := SenderItem.CurrentItemBlock.DataBlockPOS;
-  SenderItem.Return := db_Item_ok;
+  Item_.CurrentBlockSeekPOS := 0;
+  Item_.CurrentFileSeekPOS := Item_.CurrentItemBlock.DataPosition;
+  Item_.State := DB_Item_ok;
   Result := True;
 end;
 
-function dbItem_BlockReadData(var RecFile: TRecFile; var SenderItem: TItem; var Buffers; const _Size: Int64): Boolean;
+function dbItem_BlockReadData(var IOHnd: TIOHnd; var Item_: TItem; var Buffers; const _Size: Int64): Boolean;
 label
   Rep_Label;
 var
-  BuffPointer            : Pointer;
-  BuffInt                : NativeUInt;
+  BuffPointer: Pointer;
+  BuffInt: nativeUInt;
   DeformitySize, BlockPOS: Int64;
-  ItemBlock              : TItemBlock;
-  Size                   : Int64;
+  ItemBlock: TItemBlock;
+  Size: Int64;
 begin
-  if (_Size <= SenderItem.Size) then
+  if (_Size <= Item_.Size) then
       Size := _Size
   else
-      Size := SenderItem.Size;
+      Size := Item_.Size;
 
   if Size = 0 then
     begin
-      SenderItem.Return := db_Item_ok;
+      Item_.State := DB_Item_ok;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  if (SenderItem.BlockCount = 0) then
+  if (Item_.BlockCount = 0) then
     begin
-      SenderItem.Return := db_Item_BlockOverrate;
+      Item_.State := DB_Item_BlockOverrate;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if SenderItem.CurrentBlockSeekPOS > SenderItem.CurrentItemBlock.Size then
+  if Item_.CurrentBlockSeekPOS > Item_.CurrentItemBlock.Size then
     begin
-      SenderItem.Return := db_Item_BlockPositionError;
+      Item_.State := DB_Item_BlockPositionError;
       Result := False;
-      Exit;
+      exit;
     end;
-  ItemBlock := SenderItem.CurrentItemBlock;
-  BlockPOS := SenderItem.CurrentBlockSeekPOS;
-  BuffInt := NativeUInt(@Buffers);
+  ItemBlock := Item_.CurrentItemBlock;
+  BlockPOS := Item_.CurrentBlockSeekPOS;
+  BuffInt := nativeUInt(@Buffers);
   BuffPointer := Pointer(BuffInt);
   DeformitySize := Size;
 Rep_Label:
   if ItemBlock.Size - BlockPOS = 0 then
     begin
-      case ItemBlock.IDFlags of
-        db_item_LastPositionFlags, db_item_OnlyPositionFlags:
+      case ItemBlock.ID of
+        DB_Item_Last, DB_Item_1:
           begin
-            SenderItem.Return := db_Item_BlockOverrate;
+            Item_.State := DB_Item_BlockOverrate;
             Result := False;
-            Exit;
+            exit;
           end;
       end;
-      if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, RecFile, ItemBlock) = False then
+      if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, IOHnd, ItemBlock) = False then
         begin
-          SenderItem.Return := ItemBlock.Return;
+          Item_.State := ItemBlock.State;
           Result := False;
-          Exit;
+          exit;
         end;
       if BlockPOS > 0 then
           BlockPOS := 0;
       while (ItemBlock.Size - BlockPOS) = 0 do
         begin
-          case ItemBlock.IDFlags of
-            db_item_LastPositionFlags:
+          case ItemBlock.ID of
+            DB_Item_Last:
               begin
-                SenderItem.Return := db_Item_BlockOverrate;
+                Item_.State := DB_Item_BlockOverrate;
                 Result := False;
-                Exit;
+                exit;
               end;
           end;
-          if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, RecFile, ItemBlock) = False then
+          if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, IOHnd, ItemBlock) = False then
             begin
-              SenderItem.Return := ItemBlock.Return;
+              Item_.State := ItemBlock.State;
               Result := False;
-              Exit;
+              exit;
             end;
         end;
     end;
 
-  if umlFileSeek(RecFile, ItemBlock.DataBlockPOS + BlockPOS) = False then
+  if umlFileSeek(IOHnd, ItemBlock.DataPosition + BlockPOS) = False then
     begin
-      SenderItem.Return := db_Item_SetPosError;
+      Item_.State := DB_Item_SetPosError;
       Result := False;
-      Exit;
+      exit;
     end;
 
   if DeformitySize <= ItemBlock.Size - BlockPOS then
     begin
-      if umlFileRead(RecFile, DeformitySize, BuffPointer^) = False then
+      if umlFileRead(IOHnd, DeformitySize, BuffPointer^) = False then
         begin
-          SenderItem.Return := db_Item_BlockReadError;
+          Item_.State := DB_Item_BlockReadError;
           Result := False;
-          Exit;
+          exit;
         end;
-      SenderItem.CurrentBlockSeekPOS := BlockPOS + DeformitySize;
-      SenderItem.CurrentFileSeekPOS := ItemBlock.DataBlockPOS + (BlockPOS + DeformitySize);
-      SenderItem.CurrentItemBlock := ItemBlock;
-      SenderItem.Return := db_Item_ok;
+      Item_.CurrentBlockSeekPOS := BlockPOS + DeformitySize;
+      Item_.CurrentFileSeekPOS := ItemBlock.DataPosition + (BlockPOS + DeformitySize);
+      Item_.CurrentItemBlock := ItemBlock;
+      Item_.State := DB_Item_ok;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  if umlFileRead(RecFile, ItemBlock.Size - BlockPOS, BuffPointer^) = False then
+  if umlFileRead(IOHnd, ItemBlock.Size - BlockPOS, BuffPointer^) = False then
     begin
-      SenderItem.Return := db_Item_BlockReadError;
+      Item_.State := DB_Item_BlockReadError;
       Result := False;
-      Exit;
+      exit;
     end;
-  case ItemBlock.IDFlags of
-    db_item_LastPositionFlags, db_item_OnlyPositionFlags:
+  case ItemBlock.ID of
+    DB_Item_Last, DB_Item_1:
       begin
-        SenderItem.Return := db_Item_BlockOverrate;
+        Item_.State := DB_Item_BlockOverrate;
         Result := False;
-        Exit;
+        exit;
       end;
   end;
   BuffInt := BuffInt + (ItemBlock.Size - BlockPOS);
   BuffPointer := Pointer(BuffInt);
   DeformitySize := DeformitySize - (ItemBlock.Size - BlockPOS);
-  if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, RecFile, ItemBlock) = False then
+  if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, IOHnd, ItemBlock) = False then
     begin
-      SenderItem.Return := ItemBlock.Return;
+      Item_.State := ItemBlock.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
   if BlockPOS = 0 then
@@ -1814,199 +2495,199 @@ Rep_Label:
   goto Rep_Label;
 end;
 
-function dbItem_BlockAppendWriteData(var RecFile: TRecFile; var SenderItem: TItem; var Buffers; const Size: Int64): Boolean;
+function dbItem_BlockAppendWriteData(var IOHnd: TIOHnd; var Item_: TItem; var Buffers; const Size: Int64): Boolean;
 begin
-  if (SenderItem.BlockCount > 0) and ((SenderItem.CurrentItemBlock.DataBlockPOS + SenderItem.CurrentItemBlock.Size) = umlFileGetSize(RecFile)) then
+  if (Item_.BlockCount > 0) and ((Item_.CurrentItemBlock.DataPosition + Item_.CurrentItemBlock.Size) = umlFileGetSize(IOHnd)) then
     begin
-      if umlFileSeek(RecFile, umlFileGetSize(RecFile)) = False then
+      if umlFileSeek(IOHnd, umlFileGetSize(IOHnd)) = False then
         begin
-          SenderItem.Return := db_Item_SetPosError;
+          Item_.State := DB_Item_SetPosError;
           Result := False;
-          Exit;
+          exit;
         end;
-      if umlFileWrite(RecFile, Size, Buffers) = False then
+      if umlFileWrite(IOHnd, Size, Buffers) = False then
         begin
-          SenderItem.Return := db_Item_BlockWriteError;
+          Item_.State := DB_Item_BlockWriteError;
           Result := False;
-          Exit;
+          exit;
         end;
-      SenderItem.CurrentItemBlock.Size := SenderItem.CurrentItemBlock.Size + Size;
-      if dbItem_OnlyWriteItemBlockRec(SenderItem.CurrentItemBlock.CurrentBlockPOS, RecFile, SenderItem.CurrentItemBlock) = False then
+      Item_.CurrentItemBlock.Size := Item_.CurrentItemBlock.Size + Size;
+      if dbItem_OnlyWriteItemBlockRec(Item_.CurrentItemBlock.CurrentBlockPOS, IOHnd, Item_.CurrentItemBlock) = False then
         begin
-          SenderItem.Return := SenderItem.CurrentItemBlock.Return;
+          Item_.State := Item_.CurrentItemBlock.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      SenderItem.Size := SenderItem.Size + Size;
-      if dbItem_OnlyWriteItemRec(SenderItem.RHeader.DataMainPOS, RecFile, SenderItem) = False then
+      Item_.Size := Item_.Size + Size;
+      if dbItem_OnlyWriteItemRec(Item_.RHeader.DataPosition, IOHnd, Item_) = False then
         begin
           Result := False;
-          Exit;
+          exit;
         end;
-      SenderItem.CurrentBlockSeekPOS := SenderItem.CurrentItemBlock.Size;
-      SenderItem.CurrentFileSeekPOS := SenderItem.CurrentItemBlock.DataBlockPOS + SenderItem.CurrentItemBlock.Size;
-      SenderItem.DataModify := True;
-      SenderItem.Return := db_Item_ok;
+      Item_.CurrentBlockSeekPOS := Item_.CurrentItemBlock.Size;
+      Item_.CurrentFileSeekPOS := Item_.CurrentItemBlock.DataPosition + Item_.CurrentItemBlock.Size;
+      Item_.DataModification := True;
+      Item_.State := DB_Item_ok;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  if dbItem_BlockCreate(RecFile, SenderItem) = False then
+  if dbItem_BlockCreate(IOHnd, Item_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if umlFileSeek(RecFile, SenderItem.CurrentItemBlock.DataBlockPOS) = False then
+  if umlFileSeek(IOHnd, Item_.CurrentItemBlock.DataPosition) = False then
     begin
-      SenderItem.Return := db_Item_SetPosError;
+      Item_.State := DB_Item_SetPosError;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if umlFileWrite(RecFile, Size, Buffers) = False then
+  if umlFileWrite(IOHnd, Size, Buffers) = False then
     begin
-      SenderItem.Return := db_Item_BlockWriteError;
+      Item_.State := DB_Item_BlockWriteError;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderItem.CurrentItemBlock.Size := Size;
-  if dbItem_OnlyWriteItemBlockRec(SenderItem.CurrentItemBlock.CurrentBlockPOS, RecFile, SenderItem.CurrentItemBlock) = False then
+  Item_.CurrentItemBlock.Size := Size;
+  if dbItem_OnlyWriteItemBlockRec(Item_.CurrentItemBlock.CurrentBlockPOS, IOHnd, Item_.CurrentItemBlock) = False then
     begin
-      SenderItem.Return := SenderItem.CurrentItemBlock.Return;
+      Item_.State := Item_.CurrentItemBlock.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderItem.Size := SenderItem.Size + Size;
-  if dbItem_OnlyWriteItemRec(SenderItem.RHeader.DataMainPOS, RecFile, SenderItem) = False then
+  Item_.Size := Item_.Size + Size;
+  if dbItem_OnlyWriteItemRec(Item_.RHeader.DataPosition, IOHnd, Item_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderItem.CurrentBlockSeekPOS := SenderItem.CurrentItemBlock.Size;
-  SenderItem.CurrentFileSeekPOS := SenderItem.CurrentItemBlock.DataBlockPOS + SenderItem.CurrentItemBlock.Size;
-  SenderItem.DataModify := True;
-  SenderItem.Return := db_Item_ok;
+  Item_.CurrentBlockSeekPOS := Item_.CurrentItemBlock.Size;
+  Item_.CurrentFileSeekPOS := Item_.CurrentItemBlock.DataPosition + Item_.CurrentItemBlock.Size;
+  Item_.DataModification := True;
+  Item_.State := DB_Item_ok;
   Result := True;
 end;
 
-function dbItem_BlockWriteData(var RecFile: TRecFile; var SenderItem: TItem; var Buffers; const Size: Int64): Boolean;
+function dbItem_BlockWriteData(var IOHnd: TIOHnd; var Item_: TItem; var Buffers; const Size: Int64): Boolean;
 label
   Rep_Label;
 var
-  BuffPointer            : Pointer;
-  BuffInt                : NativeUInt;
+  BuffPointer: Pointer;
+  BuffInt: nativeUInt;
   DeformitySize, BlockPOS: Int64;
-  ItemBlock              : TItemBlock;
+  ItemBlock: TItemBlock;
 begin
-  if (SenderItem.Size = 0) or (SenderItem.BlockCount = 0) then
+  if (Item_.Size = 0) or (Item_.BlockCount = 0) then
     begin
-      Result := dbItem_BlockAppendWriteData(RecFile, SenderItem, Buffers, Size);
-      Exit;
+      Result := dbItem_BlockAppendWriteData(IOHnd, Item_, Buffers, Size);
+      exit;
     end;
-  case SenderItem.CurrentItemBlock.IDFlags of
-    db_item_LastPositionFlags, db_item_OnlyPositionFlags:
+  case Item_.CurrentItemBlock.ID of
+    DB_Item_Last, DB_Item_1:
       begin
-        if SenderItem.CurrentBlockSeekPOS = SenderItem.CurrentItemBlock.Size then
+        if Item_.CurrentBlockSeekPOS = Item_.CurrentItemBlock.Size then
           begin
-            Result := dbItem_BlockAppendWriteData(RecFile, SenderItem, Buffers, Size);
-            Exit;
+            Result := dbItem_BlockAppendWriteData(IOHnd, Item_, Buffers, Size);
+            exit;
           end;
       end;
   end;
 
-  if SenderItem.CurrentBlockSeekPOS > SenderItem.CurrentItemBlock.Size then
+  if Item_.CurrentBlockSeekPOS > Item_.CurrentItemBlock.Size then
     begin
-      SenderItem.Return := db_Item_BlockPositionError;
+      Item_.State := DB_Item_BlockPositionError;
       Result := False;
-      Exit;
+      exit;
     end;
-  ItemBlock := SenderItem.CurrentItemBlock;
-  BlockPOS := SenderItem.CurrentBlockSeekPOS;
-  BuffInt := NativeUInt(@Buffers);
+  ItemBlock := Item_.CurrentItemBlock;
+  BlockPOS := Item_.CurrentBlockSeekPOS;
+  BuffInt := nativeUInt(@Buffers);
   BuffPointer := Pointer(BuffInt);
   DeformitySize := Size;
 Rep_Label:
   if ItemBlock.Size - BlockPOS = 0 then
     begin
-      case ItemBlock.IDFlags of
-        db_item_LastPositionFlags, db_item_OnlyPositionFlags:
+      case ItemBlock.ID of
+        DB_Item_Last, DB_Item_1:
           begin
-            Result := dbItem_BlockAppendWriteData(RecFile, SenderItem, BuffPointer^, DeformitySize);
-            Exit;
+            Result := dbItem_BlockAppendWriteData(IOHnd, Item_, BuffPointer^, DeformitySize);
+            exit;
           end;
       end;
-      if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, RecFile, ItemBlock) = False then
+      if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, IOHnd, ItemBlock) = False then
         begin
-          SenderItem.Return := ItemBlock.Return;
+          Item_.State := ItemBlock.State;
           Result := False;
-          Exit;
+          exit;
         end;
       if BlockPOS > 0 then
           BlockPOS := 0;
       while (ItemBlock.Size - BlockPOS) = 0 do
         begin
-          case ItemBlock.IDFlags of
-            db_item_LastPositionFlags:
+          case ItemBlock.ID of
+            DB_Item_Last:
               begin
-                Result := dbItem_BlockAppendWriteData(RecFile, SenderItem, BuffPointer^, DeformitySize);
-                Exit;
+                Result := dbItem_BlockAppendWriteData(IOHnd, Item_, BuffPointer^, DeformitySize);
+                exit;
               end;
           end;
-          if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, RecFile, ItemBlock) = False then
+          if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, IOHnd, ItemBlock) = False then
             begin
-              SenderItem.Return := ItemBlock.Return;
+              Item_.State := ItemBlock.State;
               Result := False;
-              Exit;
+              exit;
             end;
         end;
     end;
 
-  if umlFileSeek(RecFile, ItemBlock.DataBlockPOS + BlockPOS) = False then
+  if umlFileSeek(IOHnd, ItemBlock.DataPosition + BlockPOS) = False then
     begin
-      SenderItem.Return := db_Item_SetPosError;
+      Item_.State := DB_Item_SetPosError;
       Result := False;
-      Exit;
+      exit;
     end;
 
   if DeformitySize <= ItemBlock.Size - BlockPOS then
     begin
-      if umlFileWrite(RecFile, DeformitySize, BuffPointer^) = False then
+      if umlFileWrite(IOHnd, DeformitySize, BuffPointer^) = False then
         begin
-          SenderItem.Return := db_Item_BlockWriteError;
+          Item_.State := DB_Item_BlockWriteError;
           Result := False;
-          Exit;
+          exit;
         end;
-      SenderItem.CurrentBlockSeekPOS := BlockPOS + DeformitySize;
-      SenderItem.CurrentFileSeekPOS := ItemBlock.DataBlockPOS + (BlockPOS + DeformitySize);
-      SenderItem.CurrentItemBlock := ItemBlock;
-      SenderItem.DataModify := True;
-      SenderItem.Return := db_Item_ok;
+      Item_.CurrentBlockSeekPOS := BlockPOS + DeformitySize;
+      Item_.CurrentFileSeekPOS := ItemBlock.DataPosition + (BlockPOS + DeformitySize);
+      Item_.CurrentItemBlock := ItemBlock;
+      Item_.DataModification := True;
+      Item_.State := DB_Item_ok;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  if umlFileWrite(RecFile, ItemBlock.Size - BlockPOS, BuffPointer^) = False then
+  if umlFileWrite(IOHnd, ItemBlock.Size - BlockPOS, BuffPointer^) = False then
     begin
-      SenderItem.Return := db_Item_BlockWriteError;
+      Item_.State := DB_Item_BlockWriteError;
       Result := False;
-      Exit;
+      exit;
     end;
   BuffInt := BuffInt + (ItemBlock.Size - BlockPOS);
   BuffPointer := Pointer(BuffInt);
   DeformitySize := DeformitySize - (ItemBlock.Size - BlockPOS);
-  case ItemBlock.IDFlags of
-    db_item_LastPositionFlags, db_item_OnlyPositionFlags:
+  case ItemBlock.ID of
+    DB_Item_Last, DB_Item_1:
       begin
-        Result := dbItem_BlockAppendWriteData(RecFile, SenderItem, BuffPointer^, DeformitySize);
-        Exit;
+        Result := dbItem_BlockAppendWriteData(IOHnd, Item_, BuffPointer^, DeformitySize);
+        exit;
       end;
   end;
-  if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, RecFile, ItemBlock) = False then
+  if dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, IOHnd, ItemBlock) = False then
     begin
-      SenderItem.Return := ItemBlock.Return;
+      Item_.State := ItemBlock.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
   if BlockPOS = 0 then
@@ -2015,826 +2696,949 @@ Rep_Label:
   goto Rep_Label;
 end;
 
-function dbItem_BlockSeekPOS(var RecFile: TRecFile; var SenderItem: TItem; const Position: Int64): Boolean;
+function dbItem_BlockSeekPOS(var IOHnd: TIOHnd; var Item_: TItem; const Position: Int64): Boolean;
 var
-  ItemBlock   : TItemBlock;
+  ItemBlock: TItemBlock;
   DeformityInt: Int64;
 begin
-  if (Position = 0) and (SenderItem.Size = 0) then
+  if (Position = 0) and (Item_.Size = 0) then
     begin
-      SenderItem.Return := db_Item_ok;
+      Item_.State := DB_Item_ok;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  if (Position > SenderItem.Size) or (SenderItem.BlockCount = 0) then
+  if (Position > Item_.Size) or (Item_.BlockCount = 0) then
     begin
-      SenderItem.Return := db_Item_BlockOverrate;
+      Item_.State := DB_Item_BlockOverrate;
       Result := False;
-      Exit;
+      exit;
     end;
   DeformityInt := Position;
-  if dbItem_OnlyReadItemBlockRec(SenderItem.FirstBlockPOS, RecFile, ItemBlock) = False then
+  if dbItem_OnlyReadItemBlockRec(Item_.FirstBlockPOS, IOHnd, ItemBlock) = False then
     begin
-      SenderItem.Return := ItemBlock.Return;
+      Item_.State := ItemBlock.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
   if DeformityInt <= ItemBlock.Size then
     begin
-      SenderItem.CurrentBlockSeekPOS := ItemBlock.Size - (ItemBlock.Size - DeformityInt);
-      SenderItem.CurrentFileSeekPOS := ItemBlock.DataBlockPOS + SenderItem.CurrentBlockSeekPOS;
-      SenderItem.CurrentItemBlock := ItemBlock;
-      SenderItem.Return := db_Item_ok;
+      Item_.CurrentBlockSeekPOS := ItemBlock.Size - (ItemBlock.Size - DeformityInt);
+      Item_.CurrentFileSeekPOS := ItemBlock.DataPosition + Item_.CurrentBlockSeekPOS;
+      Item_.CurrentItemBlock := ItemBlock;
+      Item_.State := DB_Item_ok;
       Result := True;
-      Exit;
+      exit;
     end;
-  case ItemBlock.IDFlags of
-    db_item_LastPositionFlags, db_item_OnlyPositionFlags:
+  case ItemBlock.ID of
+    DB_Item_Last, DB_Item_1:
       begin
-        SenderItem.Return := db_Item_BlockOverrate;
+        Item_.State := DB_Item_BlockOverrate;
         Result := False;
-        Exit;
+        exit;
       end;
   end;
   DeformityInt := DeformityInt - ItemBlock.Size;
-  while dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, RecFile, ItemBlock) = True do
+  while dbItem_OnlyReadItemBlockRec(ItemBlock.NextBlockPOS, IOHnd, ItemBlock) do
     begin
       if DeformityInt <= ItemBlock.Size then
         begin
-          SenderItem.CurrentBlockSeekPOS := ItemBlock.Size - (ItemBlock.Size - DeformityInt);
-          SenderItem.CurrentFileSeekPOS := ItemBlock.DataBlockPOS + SenderItem.CurrentBlockSeekPOS;
-          SenderItem.CurrentItemBlock := ItemBlock;
-          SenderItem.Return := db_Item_ok;
+          Item_.CurrentBlockSeekPOS := ItemBlock.Size - (ItemBlock.Size - DeformityInt);
+          Item_.CurrentFileSeekPOS := ItemBlock.DataPosition + Item_.CurrentBlockSeekPOS;
+          Item_.CurrentItemBlock := ItemBlock;
+          Item_.State := DB_Item_ok;
           Result := True;
-          Exit;
+          exit;
         end;
-      case ItemBlock.IDFlags of
-        db_item_LastPositionFlags:
+      case ItemBlock.ID of
+        DB_Item_Last:
           begin
-            SenderItem.Return := db_Item_BlockOverrate;
+            Item_.State := DB_Item_BlockOverrate;
             Result := False;
-            Exit;
+            exit;
           end;
       end;
       DeformityInt := DeformityInt - ItemBlock.Size;
     end;
-  SenderItem.Return := ItemBlock.Return;
+  Item_.State := ItemBlock.State;
   Result := False;
 end;
 
-function dbItem_BlockGetPOS(var RecFile: TRecFile; var SenderItem: TItem): Int64;
+function dbItem_BlockGetPOS(var IOHnd: TIOHnd; var Item_: TItem): Int64;
 var
   ItemBlock: TItemBlock;
 begin
-  if (SenderItem.Size = 0) or (SenderItem.BlockCount = 0) then
+  if (Item_.Size = 0) or (Item_.BlockCount = 0) then
     begin
-      SenderItem.Return := db_Item_BlockOverrate;
+      Item_.State := DB_Item_BlockOverrate;
       Result := 0;
-      Exit;
+      exit;
     end;
 
-  if SenderItem.CurrentBlockSeekPOS > SenderItem.CurrentItemBlock.Size then
+  if Item_.CurrentBlockSeekPOS > Item_.CurrentItemBlock.Size then
     begin
-      SenderItem.Return := db_Item_BlockPositionError;
+      Item_.State := DB_Item_BlockPositionError;
       Result := 0;
-      Exit;
+      exit;
     end;
-  Result := SenderItem.CurrentBlockSeekPOS;
-  case SenderItem.CurrentItemBlock.IDFlags of
-    db_item_FirstPositionFlags, db_item_OnlyPositionFlags:
+  Result := Item_.CurrentBlockSeekPOS;
+  case Item_.CurrentItemBlock.ID of
+    DB_Item_First, DB_Item_1:
       begin
-        SenderItem.Return := db_Item_ok;
-        Exit;
+        Item_.State := DB_Item_ok;
+        exit;
       end;
   end;
-  if dbItem_OnlyReadItemBlockRec(SenderItem.CurrentItemBlock.PrevBlockPOS, RecFile, ItemBlock) = False then
+  if dbItem_OnlyReadItemBlockRec(Item_.CurrentItemBlock.PrevBlockPOS, IOHnd, ItemBlock) = False then
     begin
-      SenderItem.Return := ItemBlock.Return;
+      Item_.State := ItemBlock.State;
       Result := 0;
-      Exit;
+      exit;
     end;
   Result := Result + ItemBlock.Size;
-  case ItemBlock.IDFlags of
-    db_item_FirstPositionFlags, db_item_OnlyPositionFlags:
+  case ItemBlock.ID of
+    DB_Item_First, DB_Item_1:
       begin
-        SenderItem.Return := db_Item_ok;
-        Exit;
+        Item_.State := DB_Item_ok;
+        exit;
       end;
   end;
-  while dbItem_OnlyReadItemBlockRec(ItemBlock.PrevBlockPOS, RecFile, ItemBlock) = True do
+  while dbItem_OnlyReadItemBlockRec(ItemBlock.PrevBlockPOS, IOHnd, ItemBlock) do
     begin
       Result := Result + ItemBlock.Size;
-      if ItemBlock.IDFlags = db_item_FirstPositionFlags then
+      if ItemBlock.ID = DB_Item_First then
         begin
-          SenderItem.Return := db_Item_ok;
-          Exit;
+          Item_.State := DB_Item_ok;
+          exit;
         end;
     end;
-  SenderItem.Return := ItemBlock.Return;
+  Item_.State := ItemBlock.State;
   Result := 0;
 end;
 
-function dbItem_BlockSeekStartPOS(var RecFile: TRecFile; var SenderItem: TItem): Boolean;
+function dbItem_BlockSeekStartPOS(var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 begin
-  if SenderItem.BlockCount = 0 then
+  if Item_.BlockCount = 0 then
     begin
-      SenderItem.Return := db_Item_BlockOverrate;
+      Item_.State := DB_Item_BlockOverrate;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_OnlyReadItemBlockRec(SenderItem.FirstBlockPOS, RecFile, SenderItem.CurrentItemBlock) = False then
+  if dbItem_OnlyReadItemBlockRec(Item_.FirstBlockPOS, IOHnd, Item_.CurrentItemBlock) = False then
     begin
-      SenderItem.Return := SenderItem.CurrentItemBlock.Return;
+      Item_.State := Item_.CurrentItemBlock.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderItem.CurrentBlockSeekPOS := 0;
-  SenderItem.CurrentFileSeekPOS := SenderItem.CurrentItemBlock.DataBlockPOS;
-  SenderItem.Return := db_Item_ok;
+  Item_.CurrentBlockSeekPOS := 0;
+  Item_.CurrentFileSeekPOS := Item_.CurrentItemBlock.DataPosition;
+  Item_.State := DB_Item_ok;
   Result := True;
 end;
 
-function dbItem_BlockSeekLastPOS(var RecFile: TRecFile; var SenderItem: TItem): Boolean;
+function dbItem_BlockSeekLastPOS(var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 begin
-  if SenderItem.BlockCount = 0 then
+  if Item_.BlockCount = 0 then
     begin
-      SenderItem.Return := db_Item_BlockOverrate;
+      Item_.State := DB_Item_BlockOverrate;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_OnlyReadItemBlockRec(SenderItem.LastBlockPOS, RecFile, SenderItem.CurrentItemBlock) = False then
+  if dbItem_OnlyReadItemBlockRec(Item_.LastBlockPOS, IOHnd, Item_.CurrentItemBlock) = False then
     begin
-      SenderItem.Return := SenderItem.CurrentItemBlock.Return;
+      Item_.State := Item_.CurrentItemBlock.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderItem.CurrentBlockSeekPOS := 0;
-  SenderItem.CurrentFileSeekPOS := SenderItem.CurrentItemBlock.DataBlockPOS;
-  SenderItem.Return := db_Item_ok;
+  Item_.CurrentBlockSeekPOS := Item_.CurrentItemBlock.Size;
+  Item_.CurrentFileSeekPOS := Item_.CurrentItemBlock.DataPosition + Item_.CurrentItemBlock.Size;
+  Item_.State := DB_Item_ok;
   Result := True;
 end;
 
-function dbField_GetPOSField(const fPos: Int64; var RecFile: TRecFile): TField;
+function dbField_GetPOSField(const fPos: Int64; var IOHnd: TIOHnd): TField;
 begin
-  dbField_ReadRec(fPos, RecFile, Result);
+  if not dbField_ReadRec(fPos, IOHnd, Result) then
+      Init_TField(Result);
 end;
 
-function dbField_GetFirstHeader(const fPos: Int64; var RecFile: TRecFile): THeader;
+function dbField_GetFirstHeader(const fPos: Int64; var IOHnd: TIOHnd): THeader;
 var
   f: TField;
 begin
-  if dbField_ReadRec(fPos, RecFile, f) = False then
-      Exit;
-  dbHeader_ReadRec(f.FirstHeaderPOS, RecFile, Result);
+  Init_THeader(Result);
+  if dbField_ReadRec(fPos, IOHnd, f) then
+      dbHeader_ReadRec(f.FirstHeaderPOS, IOHnd, Result);
 end;
 
-function dbField_GetLastHeader(const fPos: Int64; var RecFile: TRecFile): THeader;
+function dbField_GetLastHeader(const fPos: Int64; var IOHnd: TIOHnd): THeader;
 var
   f: TField;
 begin
-  if dbField_ReadRec(fPos, RecFile, f) = False then
-      Exit;
-  dbHeader_ReadRec(f.LastHeaderPOS, RecFile, Result);
+  Init_THeader(Result);
+  if dbField_ReadRec(fPos, IOHnd, f) then
+      dbHeader_ReadRec(f.LastHeaderPOS, IOHnd, Result);
 end;
 
-function dbField_OnlyFindFirstName(const Name: umlString; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
+function dbField_OnlyFindFirstName(const Name: U_String; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
 var
   f: TField;
 begin
-  SenderFieldSearch.InitFlags := False;
-  if dbField_ReadRec(fPos, RecFile, f) = False then
+  FieldS_.InitFlags := False;
+  if dbField_ReadRec(fPos, IOHnd, f) = False then
     begin
-      SenderFieldSearch.Return := f.Return;
+      FieldS_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   if f.HeaderCount = 0 then
     begin
-      SenderFieldSearch.Return := db_Header_NotFindHeader;
+      FieldS_.State := DB_Header_NotFindHeader;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_FindNext(name, f.FirstHeaderPOS, f.LastHeaderPOS, RecFile, SenderFieldSearch.RHeader) = False then
+  if dbHeader_FindNext(Name, f.FirstHeaderPOS, f.LastHeaderPOS, IOHnd, FieldS_.RHeader) = False then
     begin
-      SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+      FieldS_.State := FieldS_.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderFieldSearch.InitFlags := True;
-  SenderFieldSearch.PositionID := SenderFieldSearch.RHeader.PositionID;
-  SenderFieldSearch.OverPOS := f.LastHeaderPOS;
-  SenderFieldSearch.StartPOS := SenderFieldSearch.RHeader.NextHeader;
-  SenderFieldSearch.Name := name;
-  SenderFieldSearch.ID := SenderFieldSearch.RHeader.ID;
-  SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+  FieldS_.InitFlags := True;
+  FieldS_.PositionID := FieldS_.RHeader.PositionID;
+  FieldS_.OverPOS := f.LastHeaderPOS;
+  FieldS_.StartPos := FieldS_.RHeader.NextHeader;
+  FieldS_.Name := Name;
+  FieldS_.ID := FieldS_.RHeader.ID;
+  FieldS_.State := FieldS_.RHeader.State;
   Result := True;
 end;
 
-function dbField_OnlyFindNextName(var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
+function dbField_OnlyFindNextName(var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
 begin
-  if SenderFieldSearch.InitFlags = False then
+  if FieldS_.InitFlags = False then
     begin
-      SenderFieldSearch.Return := db_Field_NotInitSearch;
+      FieldS_.State := DB_Field_NotInitSearch;
       Result := False;
-      Exit;
+      exit;
     end;
-  case SenderFieldSearch.PositionID of
-    db_Header_OnlyPositionFlags, db_Header_LastPositionFlags:
+  case FieldS_.PositionID of
+    DB_Header_1, DB_Header_Last:
       begin
-        SenderFieldSearch.InitFlags := False;
-        SenderFieldSearch.Return := db_Header_NotFindHeader;
+        FieldS_.InitFlags := False;
+        FieldS_.State := DB_Header_NotFindHeader;
         Result := False;
-        Exit;
+        exit;
       end;
   end;
-  if dbHeader_FindNext(SenderFieldSearch.Name, SenderFieldSearch.StartPOS, SenderFieldSearch.OverPOS, RecFile, SenderFieldSearch.RHeader) = False then
+  if dbHeader_FindNext(FieldS_.Name, FieldS_.StartPos, FieldS_.OverPOS, IOHnd, FieldS_.RHeader) = False then
     begin
-      SenderFieldSearch.InitFlags := False;
-      SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+      FieldS_.InitFlags := False;
+      FieldS_.State := FieldS_.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderFieldSearch.PositionID := SenderFieldSearch.RHeader.PositionID;
-  SenderFieldSearch.StartPOS := SenderFieldSearch.RHeader.NextHeader;
-  SenderFieldSearch.ID := SenderFieldSearch.RHeader.ID;
-  SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+  FieldS_.PositionID := FieldS_.RHeader.PositionID;
+  FieldS_.StartPos := FieldS_.RHeader.NextHeader;
+  FieldS_.ID := FieldS_.RHeader.ID;
+  FieldS_.State := FieldS_.RHeader.State;
   Result := True;
 end;
 
-function dbField_OnlyFindLastName(const Name: umlString; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
+function dbField_OnlyFindLastName(const Name: U_String; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
 var
   f: TField;
 begin
-  SenderFieldSearch.InitFlags := False;
-  if dbField_ReadRec(fPos, RecFile, f) = False then
+  FieldS_.InitFlags := False;
+  if dbField_ReadRec(fPos, IOHnd, f) = False then
     begin
-      SenderFieldSearch.Return := f.Return;
+      FieldS_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   if f.HeaderCount = 0 then
     begin
-      SenderFieldSearch.Return := db_Header_NotFindHeader;
+      FieldS_.State := DB_Header_NotFindHeader;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_FindPrev(name, f.LastHeaderPOS, f.FirstHeaderPOS, RecFile, SenderFieldSearch.RHeader) = False then
+  if dbHeader_FindPrev(Name, f.LastHeaderPOS, f.FirstHeaderPOS, IOHnd, FieldS_.RHeader) = False then
     begin
-      SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+      FieldS_.State := FieldS_.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderFieldSearch.InitFlags := True;
-  SenderFieldSearch.PositionID := SenderFieldSearch.RHeader.PositionID;
-  SenderFieldSearch.OverPOS := f.FirstHeaderPOS;
-  SenderFieldSearch.StartPOS := SenderFieldSearch.RHeader.PrevHeader;
-  SenderFieldSearch.Name := name;
-  SenderFieldSearch.ID := SenderFieldSearch.RHeader.ID;
-  SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+  FieldS_.InitFlags := True;
+  FieldS_.PositionID := FieldS_.RHeader.PositionID;
+  FieldS_.OverPOS := f.FirstHeaderPOS;
+  FieldS_.StartPos := FieldS_.RHeader.PrevHeader;
+  FieldS_.Name := Name;
+  FieldS_.ID := FieldS_.RHeader.ID;
+  FieldS_.State := FieldS_.RHeader.State;
   Result := True;
 end;
 
-function dbField_OnlyFindPrevName(var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
+function dbField_OnlyFindPrevName(var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
 begin
-  if SenderFieldSearch.InitFlags = False then
+  if FieldS_.InitFlags = False then
     begin
-      SenderFieldSearch.Return := db_Field_NotInitSearch;
+      FieldS_.State := DB_Field_NotInitSearch;
       Result := False;
-      Exit;
+      exit;
     end;
-  case SenderFieldSearch.PositionID of
-    db_Header_OnlyPositionFlags, db_Header_FirstPositionFlags:
+  case FieldS_.PositionID of
+    DB_Header_1, DB_Header_First:
       begin
-        SenderFieldSearch.InitFlags := False;
-        SenderFieldSearch.Return := db_Header_NotFindHeader;
+        FieldS_.InitFlags := False;
+        FieldS_.State := DB_Header_NotFindHeader;
         Result := False;
-        Exit;
+        exit;
       end;
   end;
-  if dbHeader_FindPrev(SenderFieldSearch.Name, SenderFieldSearch.StartPOS, SenderFieldSearch.OverPOS, RecFile, SenderFieldSearch.RHeader) = False then
+  if dbHeader_FindPrev(FieldS_.Name, FieldS_.StartPos, FieldS_.OverPOS, IOHnd, FieldS_.RHeader) = False then
     begin
-      SenderFieldSearch.InitFlags := False;
-      SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+      FieldS_.InitFlags := False;
+      FieldS_.State := FieldS_.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderFieldSearch.PositionID := SenderFieldSearch.RHeader.PositionID;
-  SenderFieldSearch.StartPOS := SenderFieldSearch.RHeader.PrevHeader;
-  SenderFieldSearch.ID := SenderFieldSearch.RHeader.ID;
-  SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+  FieldS_.PositionID := FieldS_.RHeader.PositionID;
+  FieldS_.StartPos := FieldS_.RHeader.PrevHeader;
+  FieldS_.ID := FieldS_.RHeader.ID;
+  FieldS_.State := FieldS_.RHeader.State;
   Result := True;
 end;
 
-function dbField_FindFirst(const Name: umlString; const ID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
+function dbField_FindFirst(const Name: U_String; const ID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
 var
   f: TField;
 begin
-  SenderFieldSearch.InitFlags := False;
-  if dbField_ReadRec(fPos, RecFile, f) = False then
+  FieldS_.InitFlags := False;
+  if dbField_ReadRec(fPos, IOHnd, f) = False then
     begin
-      SenderFieldSearch.Return := f.Return;
+      FieldS_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   if f.HeaderCount = 0 then
     begin
-      SenderFieldSearch.Return := db_Header_NotFindHeader;
+      FieldS_.State := DB_Header_NotFindHeader;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderFieldSearch.OverPOS := f.LastHeaderPOS;
-  SenderFieldSearch.StartPOS := f.FirstHeaderPOS;
-  while dbHeader_FindNext(name, SenderFieldSearch.StartPOS, SenderFieldSearch.OverPOS, RecFile, SenderFieldSearch.RHeader) = True do
+  FieldS_.OverPOS := f.LastHeaderPOS;
+  FieldS_.StartPos := f.FirstHeaderPOS;
+  while dbHeader_FindNext(Name, FieldS_.StartPos, FieldS_.OverPOS, IOHnd, FieldS_.RHeader) do
     begin
-      SenderFieldSearch.StartPOS := SenderFieldSearch.RHeader.NextHeader;
-      if SenderFieldSearch.RHeader.ID = ID then
+      FieldS_.StartPos := FieldS_.RHeader.NextHeader;
+      if FieldS_.RHeader.ID = ID then
         begin
-          SenderFieldSearch.InitFlags := True;
-          SenderFieldSearch.PositionID := SenderFieldSearch.RHeader.PositionID;
-          SenderFieldSearch.Name := name;
-          SenderFieldSearch.ID := ID;
-          SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+          FieldS_.InitFlags := True;
+          FieldS_.PositionID := FieldS_.RHeader.PositionID;
+          FieldS_.Name := Name;
+          FieldS_.ID := ID;
+          FieldS_.State := FieldS_.RHeader.State;
           Result := True;
-          Exit;
+          exit;
         end;
-      if (SenderFieldSearch.RHeader.PositionID = db_Header_OnlyPositionFlags) or (SenderFieldSearch.RHeader.PositionID = db_Header_LastPositionFlags) then
+      if (FieldS_.RHeader.PositionID = DB_Header_1) or (FieldS_.RHeader.PositionID = DB_Header_Last) then
         begin
-          SenderFieldSearch.Return := db_Header_NotFindHeader;
+          FieldS_.State := DB_Header_NotFindHeader;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+  FieldS_.State := FieldS_.RHeader.State;
   Result := False;
 end;
 
-function dbField_FindNext(var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
+function dbField_FindNext(var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
 begin
-  if SenderFieldSearch.InitFlags = False then
+  if FieldS_.InitFlags = False then
     begin
-      SenderFieldSearch.Return := db_Field_NotInitSearch;
+      FieldS_.State := DB_Field_NotInitSearch;
       Result := False;
-      Exit;
+      exit;
     end;
-  case SenderFieldSearch.PositionID of
-    db_Header_OnlyPositionFlags, db_Header_LastPositionFlags:
+  case FieldS_.PositionID of
+    DB_Header_1, DB_Header_Last:
       begin
-        SenderFieldSearch.InitFlags := False;
-        SenderFieldSearch.Return := db_Header_NotFindHeader;
+        FieldS_.InitFlags := False;
+        FieldS_.State := DB_Header_NotFindHeader;
         Result := False;
-        Exit;
+        exit;
       end;
   end;
-  while dbHeader_FindNext(SenderFieldSearch.Name, SenderFieldSearch.StartPOS, SenderFieldSearch.OverPOS, RecFile, SenderFieldSearch.RHeader) = True do
+  while dbHeader_FindNext(FieldS_.Name, FieldS_.StartPos, FieldS_.OverPOS, IOHnd, FieldS_.RHeader) do
     begin
-      SenderFieldSearch.StartPOS := SenderFieldSearch.RHeader.NextHeader;
+      FieldS_.StartPos := FieldS_.RHeader.NextHeader;
 
-      if SenderFieldSearch.RHeader.ID = SenderFieldSearch.ID then
+      if FieldS_.RHeader.ID = FieldS_.ID then
         begin
-          SenderFieldSearch.PositionID := SenderFieldSearch.RHeader.PositionID;
-          SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+          FieldS_.PositionID := FieldS_.RHeader.PositionID;
+          FieldS_.State := FieldS_.RHeader.State;
           Result := True;
-          Exit;
+          exit;
         end;
 
-      if SenderFieldSearch.RHeader.PositionID = db_Header_LastPositionFlags then
+      if FieldS_.RHeader.PositionID = DB_Header_Last then
         begin
-          SenderFieldSearch.InitFlags := False;
-          SenderFieldSearch.Return := db_Header_NotFindHeader;
+          FieldS_.InitFlags := False;
+          FieldS_.State := DB_Header_NotFindHeader;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderFieldSearch.InitFlags := False;
-  SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+  FieldS_.InitFlags := False;
+  FieldS_.State := FieldS_.RHeader.State;
   Result := False;
 end;
 
-function dbField_FindLast(const Name: umlString; const ID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
+function dbField_FindLast(const Name: U_String; const ID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
 var
   f: TField;
 begin
-  SenderFieldSearch.InitFlags := False;
-  if dbField_ReadRec(fPos, RecFile, f) = False then
+  FieldS_.InitFlags := False;
+  if dbField_ReadRec(fPos, IOHnd, f) = False then
     begin
-      SenderFieldSearch.Return := f.Return;
+      FieldS_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   if f.HeaderCount = 0 then
     begin
-      SenderFieldSearch.Return := db_Header_NotFindHeader;
+      FieldS_.State := DB_Header_NotFindHeader;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderFieldSearch.OverPOS := f.FirstHeaderPOS;
-  SenderFieldSearch.StartPOS := f.LastHeaderPOS;
-  while dbHeader_FindPrev(name, SenderFieldSearch.StartPOS, SenderFieldSearch.OverPOS, RecFile, SenderFieldSearch.RHeader) = True do
+  FieldS_.OverPOS := f.FirstHeaderPOS;
+  FieldS_.StartPos := f.LastHeaderPOS;
+  while dbHeader_FindPrev(Name, FieldS_.StartPos, FieldS_.OverPOS, IOHnd, FieldS_.RHeader) do
     begin
-      SenderFieldSearch.StartPOS := SenderFieldSearch.RHeader.PrevHeader;
-      if SenderFieldSearch.RHeader.ID = ID then
+      FieldS_.StartPos := FieldS_.RHeader.PrevHeader;
+      if FieldS_.RHeader.ID = ID then
         begin
-          SenderFieldSearch.InitFlags := True;
-          SenderFieldSearch.PositionID := SenderFieldSearch.RHeader.PositionID;
-          SenderFieldSearch.Name := name;
-          SenderFieldSearch.ID := ID;
-          SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+          FieldS_.InitFlags := True;
+          FieldS_.PositionID := FieldS_.RHeader.PositionID;
+          FieldS_.Name := Name;
+          FieldS_.ID := ID;
+          FieldS_.State := FieldS_.RHeader.State;
           Result := True;
-          Exit;
+          exit;
         end;
-      if (SenderFieldSearch.RHeader.PositionID = db_Header_OnlyPositionFlags) or (SenderFieldSearch.RHeader.PositionID = db_Header_FirstPositionFlags) then
+      if (FieldS_.RHeader.PositionID = DB_Header_1) or (FieldS_.RHeader.PositionID = DB_Header_First) then
         begin
-          SenderFieldSearch.Return := db_Header_NotFindHeader;
+          FieldS_.State := DB_Header_NotFindHeader;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+  FieldS_.State := FieldS_.RHeader.State;
   Result := False;
 end;
 
-function dbField_FindPrev(var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
+function dbField_FindPrev(var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
 begin
-  if SenderFieldSearch.InitFlags = False then
+  if FieldS_.InitFlags = False then
     begin
-      SenderFieldSearch.Return := db_Field_NotInitSearch;
+      FieldS_.State := DB_Field_NotInitSearch;
       Result := False;
-      Exit;
+      exit;
     end;
-  case SenderFieldSearch.PositionID of
-    db_Header_OnlyPositionFlags, db_Header_FirstPositionFlags:
+  case FieldS_.PositionID of
+    DB_Header_1, DB_Header_First:
       begin
-        SenderFieldSearch.InitFlags := False;
-        SenderFieldSearch.Return := db_Header_NotFindHeader;
+        FieldS_.InitFlags := False;
+        FieldS_.State := DB_Header_NotFindHeader;
         Result := False;
-        Exit;
+        exit;
       end;
   end;
-  while dbHeader_FindPrev(SenderFieldSearch.Name, SenderFieldSearch.StartPOS, SenderFieldSearch.OverPOS, RecFile, SenderFieldSearch.RHeader) = True do
+  while dbHeader_FindPrev(FieldS_.Name, FieldS_.StartPos, FieldS_.OverPOS, IOHnd, FieldS_.RHeader) do
     begin
-      SenderFieldSearch.StartPOS := SenderFieldSearch.RHeader.PrevHeader;
+      FieldS_.StartPos := FieldS_.RHeader.PrevHeader;
 
-      if SenderFieldSearch.RHeader.ID = SenderFieldSearch.ID then
+      if FieldS_.RHeader.ID = FieldS_.ID then
         begin
-          SenderFieldSearch.PositionID := SenderFieldSearch.RHeader.PositionID;
-          SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+          FieldS_.PositionID := FieldS_.RHeader.PositionID;
+          FieldS_.State := FieldS_.RHeader.State;
           Result := True;
-          Exit;
+          exit;
         end;
 
-      if SenderFieldSearch.RHeader.PositionID = db_Header_FirstPositionFlags then
+      if FieldS_.RHeader.PositionID = DB_Header_First then
         begin
-          SenderFieldSearch.InitFlags := False;
-          SenderFieldSearch.Return := db_Header_NotFindHeader;
+          FieldS_.InitFlags := False;
+          FieldS_.State := DB_Header_NotFindHeader;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderFieldSearch.InitFlags := False;
-  SenderFieldSearch.Return := SenderFieldSearch.RHeader.Return;
+  FieldS_.InitFlags := False;
+  FieldS_.State := FieldS_.RHeader.State;
   Result := False;
 end;
 
-function dbField_FindFirstItem(const Name: umlString; const ItemExtID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
-var
-  _Item: TItem;
+function dbField_FindFirstItem(const Name: U_String; const ItemExtID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch; var Item_: TItem): Boolean;
 begin
-  if dbField_FindFirst(name, db_Header_ItemID, fPos, RecFile, SenderFieldSearch) = False then
+  if dbField_FindFirst(Name, DB_Header_Item_ID, fPos, IOHnd, FieldS_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_ReadRec(SenderFieldSearch.RHeader.CurrentHeader, RecFile, _Item) = False then
+  Item_.RHeader := FieldS_.RHeader;
+  if dbItem_OnlyReadItemRec(FieldS_.RHeader.DataPosition, IOHnd, Item_) = False then
     begin
-      SenderFieldSearch.Return := _Item.Return;
+      FieldS_.State := Item_.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if _Item.ExtID = ItemExtID then
+  if Item_.ExtID = ItemExtID then
     begin
       Result := True;
-      Exit;
+      exit;
     end;
 
-  while dbField_FindNext(RecFile, SenderFieldSearch) = True do
+  while dbField_FindNext(IOHnd, FieldS_) do
     begin
-      if dbItem_ReadRec(SenderFieldSearch.RHeader.CurrentHeader, RecFile, _Item) = False then
+      Item_.RHeader := FieldS_.RHeader;
+      if dbItem_OnlyReadItemRec(FieldS_.RHeader.DataPosition, IOHnd, Item_) = False then
         begin
-          SenderFieldSearch.Return := _Item.Return;
+          FieldS_.State := Item_.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      if _Item.ExtID = ItemExtID then
+
+      if Item_.ExtID = ItemExtID then
         begin
           Result := True;
-          Exit;
+          exit;
         end;
     end;
   Result := False;
 end;
 
-function dbField_FindNextItem(const ItemExtID: Byte; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
-var
-  _Item: TItem;
+function dbField_FindNextItem(const ItemExtID: Byte; var IOHnd: TIOHnd; var FieldS_: TFieldSearch; var Item_: TItem): Boolean;
 begin
-  while dbField_FindNext(RecFile, SenderFieldSearch) = True do
+  while dbField_FindNext(IOHnd, FieldS_) do
     begin
-      if dbItem_ReadRec(SenderFieldSearch.RHeader.CurrentHeader, RecFile, _Item) = False then
+      Item_.RHeader := FieldS_.RHeader;
+      if dbItem_OnlyReadItemRec(FieldS_.RHeader.DataPosition, IOHnd, Item_) = False then
         begin
-          SenderFieldSearch.Return := _Item.Return;
+          FieldS_.State := Item_.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      if _Item.ExtID = ItemExtID then
+
+      if Item_.ExtID = ItemExtID then
         begin
           Result := True;
-          Exit;
+          exit;
         end;
     end;
   Result := False;
 end;
 
-function dbField_FindLastItem(const Name: umlString; const ItemExtID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
-var
-  _Item: TItem;
+function dbField_FindLastItem(const Name: U_String; const ItemExtID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch; var Item_: TItem): Boolean;
 begin
-  if dbField_FindLast(name, db_Header_ItemID, fPos, RecFile, SenderFieldSearch) = False then
+  if dbField_FindLast(Name, DB_Header_Item_ID, fPos, IOHnd, FieldS_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_ReadRec(SenderFieldSearch.RHeader.CurrentHeader, RecFile, _Item) = False then
+  Item_.RHeader := FieldS_.RHeader;
+  if dbItem_OnlyReadItemRec(FieldS_.RHeader.DataPosition, IOHnd, Item_) = False then
     begin
-      SenderFieldSearch.Return := _Item.Return;
+      FieldS_.State := Item_.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if _Item.ExtID = ItemExtID then
+  if Item_.ExtID = ItemExtID then
     begin
       Result := True;
-      Exit;
+      exit;
     end;
 
-  while dbField_FindPrev(RecFile, SenderFieldSearch) = True do
+  while dbField_FindPrev(IOHnd, FieldS_) do
     begin
-      if dbItem_ReadRec(SenderFieldSearch.RHeader.CurrentHeader, RecFile, _Item) = False then
+      Item_.RHeader := FieldS_.RHeader;
+      if dbItem_OnlyReadItemRec(FieldS_.RHeader.DataPosition, IOHnd, Item_) = False then
         begin
-          SenderFieldSearch.Return := _Item.Return;
+          FieldS_.State := Item_.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      if _Item.ExtID = ItemExtID then
+
+      if Item_.ExtID = ItemExtID then
         begin
           Result := True;
-          Exit;
+          exit;
         end;
     end;
   Result := False;
 end;
 
-function dbField_FindPrevItem(const ItemExtID: Byte; var RecFile: TRecFile; var SenderFieldSearch: TFieldSearch): Boolean;
-var
-  _Item: TItem;
+function dbField_FindPrevItem(const ItemExtID: Byte; var IOHnd: TIOHnd; var FieldS_: TFieldSearch; var Item_: TItem): Boolean;
 begin
-  while dbField_FindPrev(RecFile, SenderFieldSearch) = True do
+  while dbField_FindPrev(IOHnd, FieldS_) do
     begin
-      if dbItem_ReadRec(SenderFieldSearch.RHeader.CurrentHeader, RecFile, _Item) = False then
+      Item_.RHeader := FieldS_.RHeader;
+      if dbItem_OnlyReadItemRec(FieldS_.RHeader.DataPosition, IOHnd, Item_) = False then
         begin
-          SenderFieldSearch.Return := _Item.Return;
+          FieldS_.State := Item_.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      if _Item.ExtID = ItemExtID then
+
+      if Item_.ExtID = ItemExtID then
         begin
           Result := True;
-          Exit;
+          exit;
         end;
     end;
   Result := False;
 end;
 
-function dbField_ExistItem(const Name: umlString; const ItemExtID: Byte; const fPos: Int64; var RecFile: TRecFile): Boolean;
+function dbField_FindFirstItem(const Name: U_String; const ItemExtID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
 var
-  _FieldSearch: TFieldSearch;
+  itm: TItem;
 begin
-  Result := dbField_FindFirstItem(name, ItemExtID, fPos, RecFile, _FieldSearch);
-end;
-
-function dbField_ExistHeader(const Name: umlString; const ID: Byte; const fPos: Int64; var RecFile: TRecFile): Boolean;
-var
-  _FieldSearch: TFieldSearch;
-begin
-  Result := dbField_FindFirst(name, ID, fPos, RecFile, _FieldSearch);
-end;
-
-function dbField_CreateHeader(const Name: umlString; const ID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderHeader: THeader): Boolean;
-var
-  f      : TField;
-  _Header: THeader;
-begin
-  if dbField_ReadRec(fPos, RecFile, f) = False then
+  if dbField_FindFirst(Name, DB_Header_Item_ID, fPos, IOHnd, FieldS_) = False then
     begin
-      SenderHeader.Return := f.Return;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderHeader.ID := ID;
-  SenderHeader.Name := name;
+  if dbItem_ReadRec(FieldS_.RHeader.CurrentHeader, IOHnd, itm) = False then
+    begin
+      FieldS_.State := itm.State;
+      Result := False;
+      exit;
+    end;
+
+  if itm.ExtID = ItemExtID then
+    begin
+      Result := True;
+      exit;
+    end;
+
+  while dbField_FindNext(IOHnd, FieldS_) do
+    begin
+      if dbItem_ReadRec(FieldS_.RHeader.CurrentHeader, IOHnd, itm) = False then
+        begin
+          FieldS_.State := itm.State;
+          Result := False;
+          exit;
+        end;
+      if itm.ExtID = ItemExtID then
+        begin
+          Result := True;
+          exit;
+        end;
+    end;
+  Result := False;
+end;
+
+function dbField_FindNextItem(const ItemExtID: Byte; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+var
+  itm: TItem;
+begin
+  while dbField_FindNext(IOHnd, FieldS_) do
+    begin
+      if dbItem_ReadRec(FieldS_.RHeader.CurrentHeader, IOHnd, itm) = False then
+        begin
+          FieldS_.State := itm.State;
+          Result := False;
+          exit;
+        end;
+      if itm.ExtID = ItemExtID then
+        begin
+          Result := True;
+          exit;
+        end;
+    end;
+  Result := False;
+end;
+
+function dbField_FindLastItem(const Name: U_String; const ItemExtID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+var
+  itm: TItem;
+begin
+  if dbField_FindLast(Name, DB_Header_Item_ID, fPos, IOHnd, FieldS_) = False then
+    begin
+      Result := False;
+      exit;
+    end;
+  if dbItem_ReadRec(FieldS_.RHeader.CurrentHeader, IOHnd, itm) = False then
+    begin
+      FieldS_.State := itm.State;
+      Result := False;
+      exit;
+    end;
+
+  if itm.ExtID = ItemExtID then
+    begin
+      Result := True;
+      exit;
+    end;
+
+  while dbField_FindPrev(IOHnd, FieldS_) do
+    begin
+      if dbItem_ReadRec(FieldS_.RHeader.CurrentHeader, IOHnd, itm) = False then
+        begin
+          FieldS_.State := itm.State;
+          Result := False;
+          exit;
+        end;
+      if itm.ExtID = ItemExtID then
+        begin
+          Result := True;
+          exit;
+        end;
+    end;
+  Result := False;
+end;
+
+function dbField_FindPrevItem(const ItemExtID: Byte; var IOHnd: TIOHnd; var FieldS_: TFieldSearch): Boolean;
+var
+  itm: TItem;
+begin
+  while dbField_FindPrev(IOHnd, FieldS_) do
+    begin
+      if dbItem_ReadRec(FieldS_.RHeader.CurrentHeader, IOHnd, itm) = False then
+        begin
+          FieldS_.State := itm.State;
+          Result := False;
+          exit;
+        end;
+      if itm.ExtID = ItemExtID then
+        begin
+          Result := True;
+          exit;
+        end;
+    end;
+  Result := False;
+end;
+
+function dbField_ExistItem(const Name: U_String; const ItemExtID: Byte; const fPos: Int64; var IOHnd: TIOHnd): Boolean;
+var
+  fs: TFieldSearch;
+begin
+  Result := dbField_FindFirstItem(Name, ItemExtID, fPos, IOHnd, fs);
+end;
+
+function dbField_ExistHeader(const Name: U_String; const ID: Byte; const fPos: Int64; var IOHnd: TIOHnd): Boolean;
+var
+  fs: TFieldSearch;
+begin
+  Result := dbField_FindFirst(Name, ID, fPos, IOHnd, fs);
+end;
+
+function dbField_CreateHeader(const Name: U_String; const ID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var Header_: THeader): Boolean;
+var
+  f: TField;
+  Header: THeader;
+begin
+  if dbField_ReadRec(fPos, IOHnd, f) = False then
+    begin
+      Header_.State := f.State;
+      Result := False;
+      exit;
+    end;
+  Header_.ID := ID;
+  Header_.Name := Name;
   case f.HeaderCount of
     0:
       begin
         f.HeaderCount := 1;
-        f.FirstHeaderPOS := umlFileGetSize(RecFile);
+        f.FirstHeaderPOS := umlFileGetSize(IOHnd);
         f.LastHeaderPOS := f.FirstHeaderPOS;
-        f.RHeader.LastModifyTime := umlDefaultTime;
-        SenderHeader.PositionID := db_Header_OnlyPositionFlags;
-        SenderHeader.NextHeader := f.LastHeaderPOS;
-        SenderHeader.PrevHeader := f.FirstHeaderPOS;
-        SenderHeader.CurrentHeader := f.FirstHeaderPOS;
-        SenderHeader.CreateTime := umlDefaultTime;
-        SenderHeader.LastModifyTime := umlDefaultTime;
-        SenderHeader.DataMainPOS := SenderHeader.CurrentHeader + db_Header_Size;
-        if dbField_WriteRec(f.RHeader.CurrentHeader, RecFile, f) = False then
+        f.RHeader.ModificationTime := umlDefaultTime;
+        Header_.PositionID := DB_Header_1;
+        Header_.NextHeader := f.LastHeaderPOS;
+        Header_.PrevHeader := f.FirstHeaderPOS;
+        Header_.CurrentHeader := f.FirstHeaderPOS;
+        Header_.CreateTime := umlDefaultTime;
+        Header_.ModificationTime := umlDefaultTime;
+        Header_.DataPosition := Header_.CurrentHeader + Get_DB_HeaderL(IOHnd);
+        if dbField_WriteRec(f.RHeader.CurrentHeader, IOHnd, f) = False then
           begin
-            SenderHeader.Return := f.Return;
+            Header_.State := f.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        if dbHeader_WriteRec(SenderHeader.CurrentHeader, RecFile, SenderHeader) = False then
+        if dbHeader_WriteRec(Header_.CurrentHeader, IOHnd, Header_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
       end;
     1:
       begin
-        SenderHeader.CurrentHeader := umlFileGetSize(RecFile);
-        SenderHeader.NextHeader := f.FirstHeaderPOS;
-        SenderHeader.PrevHeader := f.FirstHeaderPOS;
+        Header_.CurrentHeader := umlFileGetSize(IOHnd);
+        Header_.NextHeader := f.FirstHeaderPOS;
+        Header_.PrevHeader := f.FirstHeaderPOS;
 
-        if dbHeader_ReadRec(f.FirstHeaderPOS, RecFile, _Header) = False then
+        if dbHeader_ReadRec(f.FirstHeaderPOS, IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        _Header.PrevHeader := SenderHeader.CurrentHeader;
-        _Header.NextHeader := SenderHeader.CurrentHeader;
-        _Header.PositionID := db_Header_FirstPositionFlags;
-        if dbHeader_WriteRec(f.FirstHeaderPOS, RecFile, _Header) = False then
+        Header.PrevHeader := Header_.CurrentHeader;
+        Header.NextHeader := Header_.CurrentHeader;
+        Header.PositionID := DB_Header_First;
+        if dbHeader_WriteRec(f.FirstHeaderPOS, IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
         f.HeaderCount := f.HeaderCount + 1;
-        f.LastHeaderPOS := SenderHeader.CurrentHeader;
-        f.RHeader.LastModifyTime := umlDefaultTime;
-        SenderHeader.CreateTime := umlDefaultTime;
-        SenderHeader.LastModifyTime := umlDefaultTime;
-        SenderHeader.DataMainPOS := SenderHeader.CurrentHeader + db_Header_Size;
-        SenderHeader.PositionID := db_Header_LastPositionFlags;
-        if dbField_WriteRec(f.RHeader.CurrentHeader, RecFile, f) = False then
+        f.LastHeaderPOS := Header_.CurrentHeader;
+        f.RHeader.ModificationTime := umlDefaultTime;
+        Header_.CreateTime := umlDefaultTime;
+        Header_.ModificationTime := umlDefaultTime;
+        Header_.DataPosition := Header_.CurrentHeader + Get_DB_HeaderL(IOHnd);
+        Header_.PositionID := DB_Header_Last;
+        if dbField_WriteRec(f.RHeader.CurrentHeader, IOHnd, f) = False then
           begin
-            SenderHeader.Return := f.Return;
+            Header_.State := f.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        if dbHeader_WriteRec(SenderHeader.CurrentHeader, RecFile, SenderHeader) = False then
+        if dbHeader_WriteRec(Header_.CurrentHeader, IOHnd, Header_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
       end;
     else
       begin
-        SenderHeader.CurrentHeader := umlFileGetSize(RecFile);
+        Header_.CurrentHeader := umlFileGetSize(IOHnd);
 
         // modify first header
-        if dbHeader_ReadRec(f.FirstHeaderPOS, RecFile, _Header) = False then
+        if dbHeader_ReadRec(f.FirstHeaderPOS, IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        _Header.PrevHeader := SenderHeader.CurrentHeader;
-        SenderHeader.NextHeader := _Header.CurrentHeader;
-        if dbHeader_WriteRec(f.FirstHeaderPOS, RecFile, _Header) = False then
+        Header.PrevHeader := Header_.CurrentHeader;
+        Header_.NextHeader := Header.CurrentHeader;
+        if dbHeader_WriteRec(f.FirstHeaderPOS, IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
 
         // moidfy last header
-        if dbHeader_ReadRec(f.LastHeaderPOS, RecFile, _Header) = False then
+        if dbHeader_ReadRec(f.LastHeaderPOS, IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        _Header.NextHeader := SenderHeader.CurrentHeader;
-        SenderHeader.PrevHeader := f.LastHeaderPOS;
-        _Header.PositionID := db_Header_MediumPositionFlags;
-        if dbHeader_WriteRec(f.LastHeaderPOS, RecFile, _Header) = False then
+        Header.NextHeader := Header_.CurrentHeader;
+        Header_.PrevHeader := f.LastHeaderPOS;
+        Header.PositionID := DB_Header_Medium;
+        if dbHeader_WriteRec(f.LastHeaderPOS, IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
 
         f.HeaderCount := f.HeaderCount + 1;
-        f.LastHeaderPOS := SenderHeader.CurrentHeader;
-        f.RHeader.LastModifyTime := umlDefaultTime;
-        SenderHeader.CreateTime := umlDefaultTime;
-        SenderHeader.LastModifyTime := umlDefaultTime;
-        SenderHeader.DataMainPOS := SenderHeader.CurrentHeader + db_Header_Size;
-        SenderHeader.PositionID := db_Header_LastPositionFlags;
-        if dbField_WriteRec(f.RHeader.CurrentHeader, RecFile, f) = False then
+        f.LastHeaderPOS := Header_.CurrentHeader;
+        f.RHeader.ModificationTime := umlDefaultTime;
+        Header_.CreateTime := umlDefaultTime;
+        Header_.ModificationTime := umlDefaultTime;
+        Header_.DataPosition := Header_.CurrentHeader + Get_DB_HeaderL(IOHnd);
+        Header_.PositionID := DB_Header_Last;
+        if dbField_WriteRec(f.RHeader.CurrentHeader, IOHnd, f) = False then
           begin
-            SenderHeader.Return := f.Return;
+            Header_.State := f.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        if dbHeader_WriteRec(SenderHeader.CurrentHeader, RecFile, SenderHeader) = False then
+        if dbHeader_WriteRec(Header_.CurrentHeader, IOHnd, Header_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
       end;
   end;
-  SenderHeader.Return := db_Header_ok;
+  Header_.State := DB_Header_ok;
   Result := True;
 end;
 
-function dbField_InsertNewHeader(const Name: umlString; const ID: Byte; const fieldPos, InsertHeaderPos: Int64; var RecFile: TRecFile; var NewHeader: THeader): Boolean;
+function dbField_InsertNewHeader(const Name: U_String; const ID: Byte; const FieldPos, InsertHeaderPos: Int64; var IOHnd: TIOHnd; var NewHeader: THeader): Boolean;
 var
   f: TField;
 
   Curr, Prev: THeader;
 begin
-  if dbField_ReadRec(fieldPos, RecFile, f) = False then
+  if dbField_ReadRec(FieldPos, IOHnd, f) = False then
     begin
-      NewHeader.Return := f.Return;
+      NewHeader.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if dbHeader_ReadRec(InsertHeaderPos, RecFile, Curr) = False then
+  if dbHeader_ReadRec(InsertHeaderPos, IOHnd, Curr) = False then
     begin
-      NewHeader.Return := Curr.Return;
+      NewHeader.State := Curr.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  f.RHeader.LastModifyTime := umlDefaultTime;
+  f.RHeader.ModificationTime := umlDefaultTime;
 
-  NewHeader.CurrentHeader := umlFileGetSize(RecFile);
-  NewHeader.DataMainPOS := NewHeader.CurrentHeader + db_Header_Size;
+  NewHeader.CurrentHeader := umlFileGetSize(IOHnd);
+  NewHeader.DataPosition := NewHeader.CurrentHeader + Get_DB_HeaderL(IOHnd);
   NewHeader.CreateTime := umlDefaultTime;
-  NewHeader.LastModifyTime := umlDefaultTime;
+  NewHeader.ModificationTime := umlDefaultTime;
   NewHeader.ID := ID;
   NewHeader.UserProperty := 0;
-  NewHeader.Name := name;
-  NewHeader.Return := db_Header_ok;
+  NewHeader.Name := Name;
+  NewHeader.State := DB_Header_ok;
 
   case Curr.PositionID of
-    db_Header_FirstPositionFlags:
+    DB_Header_First:
       begin
         if f.HeaderCount > 1 then
           begin
             // moidfy field
             f.HeaderCount := f.HeaderCount + 1;
             f.FirstHeaderPOS := NewHeader.CurrentHeader;
-            if dbField_WriteRec(f.RHeader.CurrentHeader, RecFile, f) = False then
+            if dbField_WriteRec(f.RHeader.CurrentHeader, IOHnd, f) = False then
               begin
-                NewHeader.Return := f.Return;
+                NewHeader.State := f.State;
                 Result := False;
-                Exit;
+                exit;
               end;
 
             // write newheader
             NewHeader.PrevHeader := f.LastHeaderPOS;
             NewHeader.NextHeader := Curr.CurrentHeader;
-            NewHeader.PositionID := db_Header_FirstPositionFlags;
-            if dbHeader_WriteRec(NewHeader.CurrentHeader, RecFile, NewHeader) = False then
+            NewHeader.PositionID := DB_Header_First;
+            if dbHeader_WriteRec(NewHeader.CurrentHeader, IOHnd, NewHeader) = False then
               begin
                 Result := False;
-                Exit;
+                exit;
               end;
 
             // moidfy current
             Curr.PrevHeader := NewHeader.CurrentHeader;
-            Curr.PositionID := db_Header_MediumPositionFlags;
-            if dbHeader_WriteRec(Curr.CurrentHeader, RecFile, Curr) = False then
+            Curr.PositionID := DB_Header_Medium;
+            if dbHeader_WriteRec(Curr.CurrentHeader, IOHnd, Curr) = False then
               begin
-                NewHeader.Return := Curr.Return;
+                NewHeader.State := Curr.State;
                 Result := False;
-                Exit;
+                exit;
               end;
           end
         else if f.HeaderCount = 1 then
@@ -2843,137 +3647,137 @@ begin
             f.HeaderCount := f.HeaderCount + 1;
             f.FirstHeaderPOS := NewHeader.CurrentHeader;
             f.LastHeaderPOS := Curr.CurrentHeader;
-            if dbField_WriteRec(f.RHeader.CurrentHeader, RecFile, f) = False then
+            if dbField_WriteRec(f.RHeader.CurrentHeader, IOHnd, f) = False then
               begin
-                NewHeader.Return := f.Return;
+                NewHeader.State := f.State;
                 Result := False;
-                Exit;
+                exit;
               end;
 
             // write newheader
             NewHeader.PrevHeader := f.LastHeaderPOS;
             NewHeader.NextHeader := Curr.CurrentHeader;
-            NewHeader.PositionID := db_Header_FirstPositionFlags;
-            if dbHeader_WriteRec(NewHeader.CurrentHeader, RecFile, NewHeader) = False then
+            NewHeader.PositionID := DB_Header_First;
+            if dbHeader_WriteRec(NewHeader.CurrentHeader, IOHnd, NewHeader) = False then
               begin
                 Result := False;
-                Exit;
+                exit;
               end;
 
             // modify current header
             Curr.PrevHeader := NewHeader.CurrentHeader;
-            Curr.PositionID := db_Header_LastPositionFlags;
-            if dbHeader_WriteRec(Curr.CurrentHeader, RecFile, Curr) = False then
+            Curr.PositionID := DB_Header_Last;
+            if dbHeader_WriteRec(Curr.CurrentHeader, IOHnd, Curr) = False then
               begin
-                NewHeader.Return := Curr.Return;
+                NewHeader.State := Curr.State;
                 Result := False;
-                Exit;
+                exit;
               end;
           end
         else
           begin
             // error
-            NewHeader.Return := db_Header_NotFindHeader;
+            NewHeader.State := DB_Header_NotFindHeader;
             Result := False;
-            Exit;
+            exit;
           end
       end;
-    db_Header_MediumPositionFlags:
+    DB_Header_Medium:
       begin
         // read prev header
-        if dbHeader_ReadRec(Curr.PrevHeader, RecFile, Prev) = False then
+        if dbHeader_ReadRec(Curr.PrevHeader, IOHnd, Prev) = False then
           begin
-            NewHeader.Return := Prev.Return;
+            NewHeader.State := Prev.State;
             Result := False;
-            Exit;
+            exit;
           end;
 
         // modify field
         f.HeaderCount := f.HeaderCount + 1;
-        if dbField_WriteRec(f.RHeader.CurrentHeader, RecFile, f) = False then
+        if dbField_WriteRec(f.RHeader.CurrentHeader, IOHnd, f) = False then
           begin
-            NewHeader.Return := f.Return;
+            NewHeader.State := f.State;
             Result := False;
-            Exit;
+            exit;
           end;
 
         // write newheader
         NewHeader.PrevHeader := Prev.CurrentHeader;
         NewHeader.NextHeader := Curr.CurrentHeader;
-        NewHeader.PositionID := db_Header_MediumPositionFlags;
-        if dbHeader_WriteRec(NewHeader.CurrentHeader, RecFile, NewHeader) = False then
+        NewHeader.PositionID := DB_Header_Medium;
+        if dbHeader_WriteRec(NewHeader.CurrentHeader, IOHnd, NewHeader) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
 
         // modify prev header
         Prev.NextHeader := NewHeader.CurrentHeader;
-        if dbHeader_WriteRec(Prev.CurrentHeader, RecFile, Prev) = False then
+        if dbHeader_WriteRec(Prev.CurrentHeader, IOHnd, Prev) = False then
           begin
-            NewHeader.Return := Prev.Return;
+            NewHeader.State := Prev.State;
             Result := False;
-            Exit;
+            exit;
           end;
 
         // write current
         Curr.PrevHeader := NewHeader.CurrentHeader;
-        Curr.PositionID := db_Header_MediumPositionFlags;
-        if dbHeader_WriteRec(Curr.CurrentHeader, RecFile, Curr) = False then
+        Curr.PositionID := DB_Header_Medium;
+        if dbHeader_WriteRec(Curr.CurrentHeader, IOHnd, Curr) = False then
           begin
-            NewHeader.Return := Curr.Return;
+            NewHeader.State := Curr.State;
             Result := False;
-            Exit;
+            exit;
           end;
       end;
-    db_Header_LastPositionFlags:
+    DB_Header_Last:
       begin
         if f.HeaderCount > 1 then
           begin
             // read prev header
-            if dbHeader_ReadRec(Curr.PrevHeader, RecFile, Prev) = False then
+            if dbHeader_ReadRec(Curr.PrevHeader, IOHnd, Prev) = False then
               begin
-                NewHeader.Return := Prev.Return;
+                NewHeader.State := Prev.State;
                 Result := False;
-                Exit;
+                exit;
               end;
 
             // modify field
             f.HeaderCount := f.HeaderCount + 1;
-            if dbField_WriteRec(f.RHeader.CurrentHeader, RecFile, f) = False then
+            if dbField_WriteRec(f.RHeader.CurrentHeader, IOHnd, f) = False then
               begin
-                NewHeader.Return := f.Return;
+                NewHeader.State := f.State;
                 Result := False;
-                Exit;
+                exit;
               end;
 
             // write newheader
             NewHeader.PrevHeader := Prev.CurrentHeader;
             NewHeader.NextHeader := Curr.CurrentHeader;
-            NewHeader.PositionID := db_Header_MediumPositionFlags;
-            if dbHeader_WriteRec(NewHeader.CurrentHeader, RecFile, NewHeader) = False then
+            NewHeader.PositionID := DB_Header_Medium;
+            if dbHeader_WriteRec(NewHeader.CurrentHeader, IOHnd, NewHeader) = False then
               begin
                 Result := False;
-                Exit;
+                exit;
               end;
 
             // modify prev header
             Prev.NextHeader := NewHeader.CurrentHeader;
-            if dbHeader_WriteRec(Prev.CurrentHeader, RecFile, Prev) = False then
+            if dbHeader_WriteRec(Prev.CurrentHeader, IOHnd, Prev) = False then
               begin
-                NewHeader.Return := Prev.Return;
+                NewHeader.State := Prev.State;
                 Result := False;
-                Exit;
+                exit;
               end;
 
             // write current
             Curr.PrevHeader := NewHeader.CurrentHeader;
-            Curr.PositionID := db_Header_LastPositionFlags;
-            if dbHeader_WriteRec(Curr.CurrentHeader, RecFile, Curr) = False then
+            Curr.PositionID := DB_Header_Last;
+            if dbHeader_WriteRec(Curr.CurrentHeader, IOHnd, Curr) = False then
               begin
-                NewHeader.Return := Curr.Return;
+                NewHeader.State := Curr.State;
                 Result := False;
-                Exit;
+                exit;
               end;
           end
         else if f.HeaderCount = 1 then
@@ -2982,2065 +3786,2109 @@ begin
             f.HeaderCount := f.HeaderCount + 1;
             f.FirstHeaderPOS := NewHeader.CurrentHeader;
             f.LastHeaderPOS := Curr.CurrentHeader;
-            if dbField_WriteRec(f.RHeader.CurrentHeader, RecFile, f) = False then
+            if dbField_WriteRec(f.RHeader.CurrentHeader, IOHnd, f) = False then
               begin
-                NewHeader.Return := f.Return;
+                NewHeader.State := f.State;
                 Result := False;
-                Exit;
+                exit;
               end;
 
             // write newheader
             NewHeader.PrevHeader := f.LastHeaderPOS;
             NewHeader.NextHeader := Curr.CurrentHeader;
-            NewHeader.PositionID := db_Header_FirstPositionFlags;
-            if dbHeader_WriteRec(NewHeader.CurrentHeader, RecFile, NewHeader) = False then
+            NewHeader.PositionID := DB_Header_First;
+            if dbHeader_WriteRec(NewHeader.CurrentHeader, IOHnd, NewHeader) = False then
               begin
                 Result := False;
-                Exit;
+                exit;
               end;
 
             // modify current header
             Curr.PrevHeader := NewHeader.CurrentHeader;
-            Curr.PositionID := db_Header_LastPositionFlags;
-            if dbHeader_WriteRec(Curr.CurrentHeader, RecFile, Curr) = False then
+            Curr.PositionID := DB_Header_Last;
+            if dbHeader_WriteRec(Curr.CurrentHeader, IOHnd, Curr) = False then
               begin
-                NewHeader.Return := Curr.Return;
+                NewHeader.State := Curr.State;
                 Result := False;
-                Exit;
+                exit;
               end;
           end
         else
           begin
             // error
-            NewHeader.Return := db_Header_NotFindHeader;
+            NewHeader.State := DB_Header_NotFindHeader;
             Result := False;
-            Exit;
+            exit;
           end;
       end;
-    db_Header_OnlyPositionFlags:
+    DB_Header_1:
       begin
         // modify field
         f.HeaderCount := f.HeaderCount + 1;
         f.FirstHeaderPOS := NewHeader.CurrentHeader;
         f.LastHeaderPOS := Curr.CurrentHeader;
-        if dbField_WriteRec(f.RHeader.CurrentHeader, RecFile, f) = False then
+        if dbField_WriteRec(f.RHeader.CurrentHeader, IOHnd, f) = False then
           begin
-            NewHeader.Return := f.Return;
+            NewHeader.State := f.State;
             Result := False;
-            Exit;
+            exit;
           end;
 
         // write newheader
         NewHeader.PrevHeader := f.LastHeaderPOS;
         NewHeader.NextHeader := Curr.CurrentHeader;
-        NewHeader.PositionID := db_Header_FirstPositionFlags;
-        if dbHeader_WriteRec(NewHeader.CurrentHeader, RecFile, NewHeader) = False then
+        NewHeader.PositionID := DB_Header_First;
+        if dbHeader_WriteRec(NewHeader.CurrentHeader, IOHnd, NewHeader) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
 
         // modify current header
         Curr.PrevHeader := NewHeader.CurrentHeader;
-        Curr.PositionID := db_Header_LastPositionFlags;
-        if dbHeader_WriteRec(Curr.CurrentHeader, RecFile, Curr) = False then
+        Curr.PositionID := DB_Header_Last;
+        if dbHeader_WriteRec(Curr.CurrentHeader, IOHnd, Curr) = False then
           begin
-            NewHeader.Return := Curr.Return;
+            NewHeader.State := Curr.State;
             Result := False;
-            Exit;
+            exit;
           end;
       end;
   end;
 
-  NewHeader.Return := db_Header_ok;
+  NewHeader.State := DB_Header_ok;
   Result := True;
 end;
 
-function dbField_DeleteHeader(const HeaderPOS, fieldPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean;
+function dbField_DeleteHeader_(const HeaderPOS, FieldPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
 var
   DeleteHeader, SwapHeader: THeader;
 begin
-  if dbField_ReadRec(fieldPos, RecFile, SenderField) = False then
+  if dbField_ReadRec(FieldPos, IOHnd, Field_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  case SenderField.HeaderCount of
+  case Field_.HeaderCount of
     0:
       begin
-        SenderField.Return := db_Field_DeleteHeaderError;
+        Field_.State := DB_Field_DeleteHeaderError;
         Result := False;
-        Exit;
+        exit;
       end;
     1:
       begin
-        if HeaderPOS = SenderField.FirstHeaderPOS then
+        if HeaderPOS = Field_.FirstHeaderPOS then
           begin
-            SenderField.HeaderCount := 0;
-            SenderField.FirstHeaderPOS := 0;
-            SenderField.LastHeaderPOS := 0;
-            SenderField.RHeader.LastModifyTime := umlDefaultTime;
-            if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+            Field_.HeaderCount := 0;
+            Field_.FirstHeaderPOS := 0;
+            Field_.LastHeaderPOS := 0;
+            Field_.RHeader.ModificationTime := umlDefaultTime;
+            if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
               begin
                 Result := False;
-                Exit;
+                exit;
               end;
             Result := True;
-            SenderField.Return := db_Field_ok;
-            Exit;
+            Field_.State := DB_Field_ok;
+            exit;
           end;
         Result := False;
-        SenderField.Return := db_Field_DeleteHeaderError;
-        Exit;
+        Field_.State := DB_Field_DeleteHeaderError;
+        exit;
       end;
     2:
       begin
-        if dbHeader_ReadRec(HeaderPOS, RecFile, DeleteHeader) = False then
+        if dbHeader_ReadRec(HeaderPOS, IOHnd, DeleteHeader) = False then
           begin
-            SenderField.Return := DeleteHeader.Return;
+            Field_.State := DeleteHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
         case DeleteHeader.PositionID of
-          db_Header_FirstPositionFlags:
+          DB_Header_First:
             begin
-              if dbHeader_ReadRec(SenderField.LastHeaderPOS, RecFile, DeleteHeader) = False then
+              if dbHeader_ReadRec(Field_.LastHeaderPOS, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := DeleteHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              DeleteHeader.NextHeader := DeleteHeader.CurrentHeader;
-              DeleteHeader.PrevHeader := DeleteHeader.CurrentHeader;
-              DeleteHeader.PositionID := db_Header_OnlyPositionFlags;
-              if dbHeader_WriteRec(DeleteHeader.CurrentHeader, RecFile, DeleteHeader) = False then
+              SwapHeader.NextHeader := SwapHeader.CurrentHeader;
+              SwapHeader.PrevHeader := SwapHeader.CurrentHeader;
+              SwapHeader.PositionID := DB_Header_1;
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := DeleteHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.FirstHeaderPOS := DeleteHeader.CurrentHeader;
-              SenderField.LastHeaderPOS := DeleteHeader.CurrentHeader;
-              SenderField.HeaderCount := SenderField.HeaderCount - 1;
-              SenderField.RHeader.LastModifyTime := umlDefaultTime;
-              if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+              Field_.FirstHeaderPOS := SwapHeader.CurrentHeader;
+              Field_.LastHeaderPOS := SwapHeader.CurrentHeader;
+              Field_.HeaderCount := Field_.HeaderCount - 1;
+              Field_.RHeader.ModificationTime := umlDefaultTime;
+              if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
                 begin
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.Return := db_Field_ok;
+              Field_.State := DB_Field_ok;
               Result := True;
             end;
-          db_Header_LastPositionFlags:
+          DB_Header_Last:
             begin
-              if dbHeader_ReadRec(SenderField.FirstHeaderPOS, RecFile, DeleteHeader) = False then
+              if dbHeader_ReadRec(Field_.FirstHeaderPOS, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := DeleteHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              DeleteHeader.NextHeader := DeleteHeader.CurrentHeader;
-              DeleteHeader.PrevHeader := DeleteHeader.CurrentHeader;
-              DeleteHeader.PositionID := db_Header_OnlyPositionFlags;
-              if dbHeader_WriteRec(DeleteHeader.CurrentHeader, RecFile, DeleteHeader) = False then
+              SwapHeader.NextHeader := SwapHeader.CurrentHeader;
+              SwapHeader.PrevHeader := SwapHeader.CurrentHeader;
+              SwapHeader.PositionID := DB_Header_1;
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := DeleteHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.FirstHeaderPOS := DeleteHeader.CurrentHeader;
-              SenderField.LastHeaderPOS := DeleteHeader.CurrentHeader;
-              SenderField.HeaderCount := SenderField.HeaderCount - 1;
-              SenderField.RHeader.LastModifyTime := umlDefaultTime;
-              if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+              Field_.FirstHeaderPOS := SwapHeader.CurrentHeader;
+              Field_.LastHeaderPOS := SwapHeader.CurrentHeader;
+              Field_.HeaderCount := Field_.HeaderCount - 1;
+              Field_.RHeader.ModificationTime := umlDefaultTime;
+              if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
                 begin
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.Return := db_Field_ok;
+              Field_.State := DB_Field_ok;
               Result := True;
             end;
           else
             begin
-              SenderField.Return := db_Field_DeleteHeaderError;
+              Field_.State := DB_Field_DeleteHeaderError;
               Result := False;
             end;
         end;
-        Exit;
+        exit;
       end;
     3:
       begin
-        if dbHeader_ReadRec(HeaderPOS, RecFile, DeleteHeader) = False then
+        if dbHeader_ReadRec(HeaderPOS, IOHnd, DeleteHeader) = False then
           begin
-            SenderField.Return := DeleteHeader.Return;
+            Field_.State := DeleteHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
         case DeleteHeader.PositionID of
-          db_Header_FirstPositionFlags:
+          DB_Header_First:
             begin
-              if dbHeader_ReadRec(DeleteHeader.NextHeader, RecFile, SwapHeader) = False then
+              if dbHeader_ReadRec(DeleteHeader.NextHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.PrevHeader := DeleteHeader.PrevHeader;
-              SwapHeader.PositionID := db_Header_FirstPositionFlags;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              SwapHeader.PositionID := DB_Header_First;
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.FirstHeaderPOS := SwapHeader.CurrentHeader;
-              if dbHeader_ReadRec(DeleteHeader.PrevHeader, RecFile, SwapHeader) = False then
+              Field_.FirstHeaderPOS := SwapHeader.CurrentHeader;
+              if dbHeader_ReadRec(DeleteHeader.PrevHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.NextHeader := DeleteHeader.NextHeader;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.HeaderCount := SenderField.HeaderCount - 1;
-              SenderField.RHeader.LastModifyTime := umlDefaultTime;
-              if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+              Field_.HeaderCount := Field_.HeaderCount - 1;
+              Field_.RHeader.ModificationTime := umlDefaultTime;
+              if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
                 begin
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.Return := db_Field_ok;
+              Field_.State := DB_Field_ok;
               Result := True;
             end;
-          db_Header_MediumPositionFlags:
+          DB_Header_Medium:
             begin
-              if dbHeader_ReadRec(DeleteHeader.PrevHeader, RecFile, SwapHeader) = False then
+              if dbHeader_ReadRec(DeleteHeader.PrevHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.NextHeader := DeleteHeader.NextHeader;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              if dbHeader_ReadRec(DeleteHeader.NextHeader, RecFile, SwapHeader) = False then
+              if dbHeader_ReadRec(DeleteHeader.NextHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.PrevHeader := DeleteHeader.PrevHeader;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.HeaderCount := SenderField.HeaderCount - 1;
-              SenderField.RHeader.LastModifyTime := umlDefaultTime;
-              if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+              Field_.HeaderCount := Field_.HeaderCount - 1;
+              Field_.RHeader.ModificationTime := umlDefaultTime;
+              if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
                 begin
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.Return := db_Field_ok;
+              Field_.State := DB_Field_ok;
               Result := True;
             end;
-          db_Header_LastPositionFlags:
+          DB_Header_Last:
             begin
-              if dbHeader_ReadRec(DeleteHeader.PrevHeader, RecFile, SwapHeader) = False then
+              if dbHeader_ReadRec(DeleteHeader.PrevHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.NextHeader := DeleteHeader.NextHeader;
-              SwapHeader.PositionID := db_Header_LastPositionFlags;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              SwapHeader.PositionID := DB_Header_Last;
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.LastHeaderPOS := SwapHeader.CurrentHeader;
-              if dbHeader_ReadRec(DeleteHeader.NextHeader, RecFile, SwapHeader) = False then
+              Field_.LastHeaderPOS := SwapHeader.CurrentHeader;
+              if dbHeader_ReadRec(DeleteHeader.NextHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.PrevHeader := DeleteHeader.PrevHeader;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.HeaderCount := SenderField.HeaderCount - 1;
-              SenderField.RHeader.LastModifyTime := umlDefaultTime;
-              if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+              Field_.HeaderCount := Field_.HeaderCount - 1;
+              Field_.RHeader.ModificationTime := umlDefaultTime;
+              if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
                 begin
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.Return := db_Field_ok;
+              Field_.State := DB_Field_ok;
               Result := True;
             end;
           else
             begin
-              SenderField.Return := db_Field_DeleteHeaderError;
+              Field_.State := DB_Field_DeleteHeaderError;
               Result := False;
             end;
         end;
-        Exit;
+        exit;
       end;
     else
       begin
-        if dbHeader_ReadRec(HeaderPOS, RecFile, DeleteHeader) = False then
+        if dbHeader_ReadRec(HeaderPOS, IOHnd, DeleteHeader) = False then
           begin
-            SenderField.Return := DeleteHeader.Return;
+            Field_.State := DeleteHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
         case DeleteHeader.PositionID of
-          db_Header_FirstPositionFlags:
+          DB_Header_First:
             begin
-              if dbHeader_ReadRec(DeleteHeader.NextHeader, RecFile, SwapHeader) = False then
+              if dbHeader_ReadRec(DeleteHeader.NextHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.PrevHeader := DeleteHeader.PrevHeader;
-              SwapHeader.PositionID := db_Header_FirstPositionFlags;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              SwapHeader.PositionID := DB_Header_First;
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.FirstHeaderPOS := SwapHeader.CurrentHeader;
-              if dbHeader_ReadRec(DeleteHeader.PrevHeader, RecFile, SwapHeader) = False then
+              Field_.FirstHeaderPOS := SwapHeader.CurrentHeader;
+              if dbHeader_ReadRec(DeleteHeader.PrevHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.NextHeader := DeleteHeader.NextHeader;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.HeaderCount := SenderField.HeaderCount - 1;
-              SenderField.RHeader.LastModifyTime := umlDefaultTime;
-              if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+              Field_.HeaderCount := Field_.HeaderCount - 1;
+              Field_.RHeader.ModificationTime := umlDefaultTime;
+              if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
                 begin
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.Return := db_Field_ok;
+              Field_.State := DB_Field_ok;
               Result := True;
             end;
-          db_Header_MediumPositionFlags:
+          DB_Header_Medium:
             begin
-              if dbHeader_ReadRec(DeleteHeader.PrevHeader, RecFile, SwapHeader) = False then
+              if dbHeader_ReadRec(DeleteHeader.PrevHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.NextHeader := DeleteHeader.NextHeader;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              if dbHeader_ReadRec(DeleteHeader.NextHeader, RecFile, SwapHeader) = False then
+              if dbHeader_ReadRec(DeleteHeader.NextHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.PrevHeader := DeleteHeader.PrevHeader;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.HeaderCount := SenderField.HeaderCount - 1;
-              SenderField.RHeader.LastModifyTime := umlDefaultTime;
-              if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+              Field_.HeaderCount := Field_.HeaderCount - 1;
+              Field_.RHeader.ModificationTime := umlDefaultTime;
+              if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
                 begin
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.Return := db_Field_ok;
+              Field_.State := DB_Field_ok;
               Result := True;
             end;
-          db_Header_LastPositionFlags:
+          DB_Header_Last:
             begin
-              if dbHeader_ReadRec(DeleteHeader.PrevHeader, RecFile, SwapHeader) = False then
+              if dbHeader_ReadRec(DeleteHeader.PrevHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.NextHeader := DeleteHeader.NextHeader;
-              SwapHeader.PositionID := db_Header_LastPositionFlags;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              SwapHeader.PositionID := DB_Header_Last;
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.LastHeaderPOS := SwapHeader.CurrentHeader;
-              if dbHeader_ReadRec(DeleteHeader.NextHeader, RecFile, SwapHeader) = False then
+              Field_.LastHeaderPOS := SwapHeader.CurrentHeader;
+              if dbHeader_ReadRec(DeleteHeader.NextHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
               SwapHeader.PrevHeader := DeleteHeader.PrevHeader;
-              if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+              if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
                 begin
-                  SenderField.Return := SwapHeader.Return;
+                  Field_.State := SwapHeader.State;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.HeaderCount := SenderField.HeaderCount - 1;
-              SenderField.RHeader.LastModifyTime := umlDefaultTime;
-              if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+              Field_.HeaderCount := Field_.HeaderCount - 1;
+              Field_.RHeader.ModificationTime := umlDefaultTime;
+              if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
                 begin
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              SenderField.Return := db_Field_ok;
+              Field_.State := DB_Field_ok;
               Result := True;
             end;
           else
             begin
-              SenderField.Return := db_Field_DeleteHeaderError;
+              Field_.State := DB_Field_DeleteHeaderError;
               Result := False;
             end;
         end;
-        Exit;
+        exit;
       end;
   end;
   Result := True;
 end;
 
-function dbField_MoveHeader(const HeaderPOS: Int64; const SourcerFieldPOS, TargetFieldPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean;
+function dbField_DeleteHeader(const HeaderPOS, FieldPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
+begin
+  Result := dbField_DeleteHeader_(HeaderPOS, FieldPos, IOHnd, Field_);
+  if Result then
+    if IOHnd.Data <> nil then
+      if Assigned(PObjectDataHandle(IOHnd.Data)^.OnDeleteHeader) then
+          PObjectDataHandle(IOHnd.Data)^.OnDeleteHeader(HeaderPOS);
+end;
+
+function dbField_MoveHeader(const HeaderPOS: Int64; const SourcerFieldPOS, TargetFieldPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
 var
   ActiveHeader, SwapHeader: THeader;
 begin
-  if dbHeader_ReadRec(HeaderPOS, RecFile, ActiveHeader) = False then
+  if dbHeader_ReadRec(HeaderPOS, IOHnd, ActiveHeader) = False then
     begin
-      SenderField.Return := ActiveHeader.Return;
+      Field_.State := ActiveHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_DeleteHeader(ActiveHeader.CurrentHeader, SourcerFieldPOS, RecFile, SenderField) = False then
+  if dbField_DeleteHeader_(ActiveHeader.CurrentHeader, SourcerFieldPOS, IOHnd, Field_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if dbField_ReadRec(TargetFieldPos, RecFile, SenderField) = False then
+  if dbField_ReadRec(TargetFieldPos, IOHnd, Field_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  case SenderField.HeaderCount of
+  case Field_.HeaderCount of
     0:
       begin
-        SenderField.HeaderCount := 1;
-        SenderField.FirstHeaderPOS := ActiveHeader.CurrentHeader;
-        SenderField.LastHeaderPOS := SenderField.FirstHeaderPOS;
-        ActiveHeader.PositionID := db_Header_OnlyPositionFlags;
-        ActiveHeader.NextHeader := SenderField.FirstHeaderPOS;
-        ActiveHeader.PrevHeader := SenderField.FirstHeaderPOS;
-        if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+        Field_.HeaderCount := 1;
+        Field_.FirstHeaderPOS := ActiveHeader.CurrentHeader;
+        Field_.LastHeaderPOS := Field_.FirstHeaderPOS;
+        ActiveHeader.PositionID := DB_Header_1;
+        ActiveHeader.NextHeader := Field_.FirstHeaderPOS;
+        ActiveHeader.PrevHeader := Field_.FirstHeaderPOS;
+        if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
-        if dbHeader_WriteRec(ActiveHeader.CurrentHeader, RecFile, ActiveHeader) = False then
+        if dbHeader_WriteRec(ActiveHeader.CurrentHeader, IOHnd, ActiveHeader) = False then
           begin
-            SenderField.Return := ActiveHeader.Return;
+            Field_.State := ActiveHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
       end;
     1:
       begin
 
-        if dbHeader_ReadRec(SenderField.FirstHeaderPOS, RecFile, SwapHeader) = False then
+        if dbHeader_ReadRec(Field_.FirstHeaderPOS, IOHnd, SwapHeader) = False then
           begin
-            SenderField.Return := SwapHeader.Return;
+            Field_.State := SwapHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
         SwapHeader.PrevHeader := ActiveHeader.CurrentHeader;
         SwapHeader.NextHeader := ActiveHeader.CurrentHeader;
-        SwapHeader.PositionID := db_Header_FirstPositionFlags;
+        SwapHeader.PositionID := DB_Header_First;
         ActiveHeader.NextHeader := SwapHeader.CurrentHeader;
         ActiveHeader.PrevHeader := SwapHeader.CurrentHeader;
-        ActiveHeader.PositionID := db_Header_LastPositionFlags;
+        ActiveHeader.PositionID := DB_Header_Last;
 
-        if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+        if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
           begin
-            SenderField.Return := SwapHeader.Return;
+            Field_.State := SwapHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        SenderField.HeaderCount := SenderField.HeaderCount + 1;
-        SenderField.LastHeaderPOS := ActiveHeader.CurrentHeader;
-        SenderField.RHeader.LastModifyTime := umlDefaultTime;
-        if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+        Field_.HeaderCount := Field_.HeaderCount + 1;
+        Field_.LastHeaderPOS := ActiveHeader.CurrentHeader;
+        Field_.RHeader.ModificationTime := umlDefaultTime;
+        if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
-        if dbHeader_WriteRec(ActiveHeader.CurrentHeader, RecFile, ActiveHeader) = False then
+        if dbHeader_WriteRec(ActiveHeader.CurrentHeader, IOHnd, ActiveHeader) = False then
           begin
-            SenderField.Return := ActiveHeader.Return;
+            Field_.State := ActiveHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
       end;
     else
       begin
-
-        if dbHeader_ReadRec(SenderField.FirstHeaderPOS, RecFile, SwapHeader) = False then
+        if dbHeader_ReadRec(Field_.FirstHeaderPOS, IOHnd, SwapHeader) = False then
           begin
-            SenderField.Return := SwapHeader.Return;
+            Field_.State := SwapHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
         SwapHeader.PrevHeader := ActiveHeader.CurrentHeader;
-        SwapHeader.PositionID := db_Header_FirstPositionFlags;
+        SwapHeader.PositionID := DB_Header_First;
         ActiveHeader.NextHeader := SwapHeader.CurrentHeader;
-        if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+        if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
           begin
-            SenderField.Return := SwapHeader.Return;
+            Field_.State := SwapHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
 
-        if dbHeader_ReadRec(SenderField.LastHeaderPOS, RecFile, SwapHeader) = False then
+        if dbHeader_ReadRec(Field_.LastHeaderPOS, IOHnd, SwapHeader) = False then
           begin
-            SenderField.Return := SwapHeader.Return;
+            Field_.State := SwapHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
         SwapHeader.NextHeader := ActiveHeader.CurrentHeader;
         ActiveHeader.PrevHeader := SwapHeader.CurrentHeader;
-        SwapHeader.PositionID := db_Header_MediumPositionFlags;
-        if dbHeader_WriteRec(SwapHeader.CurrentHeader, RecFile, SwapHeader) = False then
+        SwapHeader.PositionID := DB_Header_Medium;
+        if dbHeader_WriteRec(SwapHeader.CurrentHeader, IOHnd, SwapHeader) = False then
           begin
-            SenderField.Return := SwapHeader.Return;
+            Field_.State := SwapHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        SenderField.HeaderCount := SenderField.HeaderCount + 1;
-        SenderField.LastHeaderPOS := ActiveHeader.CurrentHeader;
-        SenderField.RHeader.LastModifyTime := umlDefaultTime;
-        ActiveHeader.PositionID := db_Header_LastPositionFlags;
-        if dbField_WriteRec(SenderField.RHeader.CurrentHeader, RecFile, SenderField) = False then
+        Field_.HeaderCount := Field_.HeaderCount + 1;
+        Field_.LastHeaderPOS := ActiveHeader.CurrentHeader;
+        Field_.RHeader.ModificationTime := umlDefaultTime;
+        ActiveHeader.PositionID := DB_Header_Last;
+        if dbField_WriteRec(Field_.RHeader.CurrentHeader, IOHnd, Field_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
-        if dbHeader_WriteRec(ActiveHeader.CurrentHeader, RecFile, ActiveHeader) = False then
+        if dbHeader_WriteRec(ActiveHeader.CurrentHeader, IOHnd, ActiveHeader) = False then
           begin
-            SenderField.Return := ActiveHeader.Return;
+            Field_.State := ActiveHeader.State;
             Result := False;
-            Exit;
+            exit;
           end;
       end;
   end;
-  SenderField.Return := db_Field_ok;
+  Field_.State := DB_Field_ok;
   Result := True;
 end;
 
-function dbField_CreateField(const Name: umlString; const fPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean;
+function dbField_CreateField(const Name: U_String; const fPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
 begin
-  if dbField_CreateHeader(name, db_Header_FieldID, fPos, RecFile, SenderField.RHeader) = False then
+  if dbField_CreateHeader(Name, DB_Header_Field_ID, fPos, IOHnd, Field_.RHeader) = False then
     begin
-      SenderField.Return := SenderField.RHeader.Return;
+      Field_.State := Field_.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  SenderField.HeaderCount := 0;
-  SenderField.UpLevelFieldPOS := fPos;
-  if dbField_OnlyWriteFieldRec(SenderField.RHeader.DataMainPOS, RecFile, SenderField) = False then
+  Field_.HeaderCount := 0;
+  Field_.UpFieldPOS := fPos;
+  if dbField_OnlyWriteFieldRec(Field_.RHeader.DataPosition, IOHnd, Field_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderField.Return := db_Field_ok;
+  Field_.State := DB_Field_ok;
   Result := True;
 end;
 
-function dbField_InsertNewField(const Name: umlString; const fieldPos, CurrentInsertPos: Int64; var RecFile: TRecFile; var SenderField: TField): Boolean;
+function dbField_InsertNewField(const Name: U_String; const FieldPos, CurrentInsertPos: Int64; var IOHnd: TIOHnd; var Field_: TField): Boolean;
 begin
-  if dbField_InsertNewHeader(name, db_Header_FieldID, fieldPos, CurrentInsertPos, RecFile, SenderField.RHeader) = False then
+  if dbField_InsertNewHeader(Name, DB_Header_Field_ID, FieldPos, CurrentInsertPos, IOHnd, Field_.RHeader) = False then
     begin
-      SenderField.Return := SenderField.RHeader.Return;
+      Field_.State := Field_.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  SenderField.HeaderCount := 0;
-  SenderField.UpLevelFieldPOS := fieldPos;
-  if dbField_OnlyWriteFieldRec(SenderField.RHeader.DataMainPOS, RecFile, SenderField) = False then
+  Field_.HeaderCount := 0;
+  Field_.UpFieldPOS := FieldPos;
+  if dbField_OnlyWriteFieldRec(Field_.RHeader.DataPosition, IOHnd, Field_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderField.Return := db_Field_ok;
+  Field_.State := DB_Field_ok;
   Result := True;
 end;
 
-function dbField_CreateItem(const Name: umlString; const ExterID: Byte; const fPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean;
+function dbField_CreateItem(const Name: U_String; const ExterID: Byte; const fPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 begin
-  if dbField_CreateHeader(name, db_Header_ItemID, fPos, RecFile, SenderItem.RHeader) = False then
+  if dbField_CreateHeader(Name, DB_Header_Item_ID, fPos, IOHnd, Item_.RHeader) = False then
     begin
-      SenderItem.Return := SenderItem.RHeader.Return;
+      Item_.State := Item_.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  SenderItem.ExtID := ExterID;
-  SenderItem.FirstBlockPOS := 0;
-  SenderItem.LastBlockPOS := 0;
-  SenderItem.Size := 0;
-  SenderItem.BlockCount := 0;
-  SenderItem.RHeader.LastModifyTime := umlDefaultTime;
-  if dbItem_OnlyWriteItemRec(SenderItem.RHeader.DataMainPOS, RecFile, SenderItem) = False then
+  Item_.ExtID := ExterID;
+  Item_.FirstBlockPOS := 0;
+  Item_.LastBlockPOS := 0;
+  Item_.Size := 0;
+  Item_.BlockCount := 0;
+  Item_.RHeader.ModificationTime := umlDefaultTime;
+  if dbItem_OnlyWriteItemRec(Item_.RHeader.DataPosition, IOHnd, Item_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderItem.DataModify := True;
-  SenderItem.Return := db_Item_ok;
+  Item_.DataModification := True;
+  Item_.State := DB_Item_ok;
   Result := True;
 end;
 
-function dbField_InsertNewItem(const Name: umlString; const ExterID: Byte; const fieldPos, CurrentInsertPos: Int64; var RecFile: TRecFile; var SenderItem: TItem): Boolean;
+function dbField_InsertNewItem(const Name: U_String; const ExterID: Byte; const FieldPos, CurrentInsertPos: Int64; var IOHnd: TIOHnd; var Item_: TItem): Boolean;
 begin
-  if dbField_InsertNewHeader(name, db_Header_ItemID, fieldPos, CurrentInsertPos, RecFile, SenderItem.RHeader) = False then
+  if dbField_InsertNewHeader(Name, DB_Header_Item_ID, FieldPos, CurrentInsertPos, IOHnd, Item_.RHeader) = False then
     begin
-      SenderItem.Return := SenderItem.RHeader.Return;
+      Item_.State := Item_.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  SenderItem.ExtID := ExterID;
-  SenderItem.FirstBlockPOS := 0;
-  SenderItem.LastBlockPOS := 0;
-  SenderItem.Size := 0;
-  SenderItem.BlockCount := 0;
-  SenderItem.RHeader.LastModifyTime := umlDefaultTime;
-  if dbItem_OnlyWriteItemRec(SenderItem.RHeader.DataMainPOS, RecFile, SenderItem) = False then
+  Item_.ExtID := ExterID;
+  Item_.FirstBlockPOS := 0;
+  Item_.LastBlockPOS := 0;
+  Item_.Size := 0;
+  Item_.BlockCount := 0;
+  Item_.RHeader.ModificationTime := umlDefaultTime;
+  if dbItem_OnlyWriteItemRec(Item_.RHeader.DataPosition, IOHnd, Item_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderItem.DataModify := True;
-  SenderItem.Return := db_Item_ok;
+  Item_.DataModification := True;
+  Item_.State := DB_Item_ok;
   Result := True;
 end;
 
-function dbField_CopyItem(var SenderItem: TItem; var RecFile: TRecFile; const DestFieldPos: Int64; var DestRecFile: TRecFile): Boolean;
+function dbField_CopyItem(var Item_: TItem; var IOHnd: TIOHnd; const DestFieldPos: Int64; var DestIOHnd: TIOHnd): Boolean;
 var
-  Rep_Int   : Integer;
+  i: Integer;
   NewItemHnd: TItem;
-  buff      : array [0 .. umlMaxFileRecSize] of umlChar;
+  buff: array [0 .. C_MaxBufferFragmentSize] of Byte;
 begin
-  InitTItem(NewItemHnd);
-  NewItemHnd := SenderItem;
-  if dbField_CreateItem(SenderItem.RHeader.Name, SenderItem.ExtID, DestFieldPos, DestRecFile, NewItemHnd) = False then
+  Init_TItem(NewItemHnd);
+  NewItemHnd := Item_;
+  if dbField_CreateItem(Item_.RHeader.Name, Item_.ExtID, DestFieldPos, DestIOHnd, NewItemHnd) = False then
     begin
-      SenderItem.Return := NewItemHnd.Return;
+      Item_.State := NewItemHnd.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_BlockSeekStartPOS(RecFile, SenderItem) = False then
+  if dbItem_BlockSeekStartPOS(IOHnd, Item_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if SenderItem.Size > umlMaxFileRecSize then
+  if Item_.Size > C_MaxBufferFragmentSize then
     begin
-      for Rep_Int := 1 to (SenderItem.Size div umlMaxFileRecSize) do
+      for i := 1 to (Item_.Size div C_MaxBufferFragmentSize) do
         begin
-          if dbItem_BlockReadData(RecFile, SenderItem, buff, umlMaxFileRecSize) = False then
+          if dbItem_BlockReadData(IOHnd, Item_, buff, C_MaxBufferFragmentSize) = False then
             begin
               Result := False;
-              Exit;
+              exit;
             end;
-          if dbItem_BlockAppendWriteData(DestRecFile, NewItemHnd, buff, umlMaxFileRecSize) = False then
+          if dbItem_BlockAppendWriteData(DestIOHnd, NewItemHnd, buff, C_MaxBufferFragmentSize) = False then
             begin
-              SenderItem.Return := NewItemHnd.Return;
+              Item_.State := NewItemHnd.State;
               Result := False;
-              Exit;
+              exit;
             end;
         end;
-      if (SenderItem.Size mod umlMaxFileRecSize) > 0 then
+      if (Item_.Size mod C_MaxBufferFragmentSize) > 0 then
         begin
-          if dbItem_BlockReadData(RecFile, SenderItem, buff, SenderItem.Size mod umlMaxFileRecSize) = False then
+          if dbItem_BlockReadData(IOHnd, Item_, buff, Item_.Size mod C_MaxBufferFragmentSize) = False then
             begin
               Result := False;
-              Exit;
+              exit;
             end;
-          if dbItem_BlockAppendWriteData(DestRecFile, NewItemHnd, buff, SenderItem.Size mod umlMaxFileRecSize) = False then
+          if dbItem_BlockAppendWriteData(DestIOHnd, NewItemHnd, buff, Item_.Size mod C_MaxBufferFragmentSize) = False then
             begin
-              SenderItem.Return := NewItemHnd.Return;
+              Item_.State := NewItemHnd.State;
               Result := False;
-              Exit;
+              exit;
             end;
         end;
     end
   else
     begin
-      if dbItem_BlockReadData(RecFile, SenderItem, buff, SenderItem.Size) = False then
+      if dbItem_BlockReadData(IOHnd, Item_, buff, Item_.Size) = False then
         begin
           Result := False;
-          Exit;
+          exit;
         end;
-      if dbItem_BlockAppendWriteData(DestRecFile, NewItemHnd, buff, SenderItem.Size) = False then
+      if dbItem_BlockAppendWriteData(DestIOHnd, NewItemHnd, buff, Item_.Size) = False then
         begin
-          SenderItem.Return := NewItemHnd.Return;
+          Item_.State := NewItemHnd.State;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  if dbItem_WriteRec(NewItemHnd.RHeader.CurrentHeader, DestRecFile, NewItemHnd) = False then
+  if dbItem_WriteRec(NewItemHnd.RHeader.CurrentHeader, DestIOHnd, NewItemHnd) = False then
     begin
-      SenderItem.Return := NewItemHnd.Return;
+      Item_.State := NewItemHnd.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderItem.Return := db_Item_ok;
+  Item_.State := DB_Item_ok;
   Result := True;
 end;
 
-function dbField_CopyItemBuffer(var SenderItem: TItem; var RecFile: TRecFile; var DestItemHnd: TItem; var DestRecFile: TRecFile): Boolean;
+function dbField_CopyItemBuffer(var Item_: TItem; var IOHnd: TIOHnd; var DestItem_: TItem; var DestIOHnd: TIOHnd): Boolean;
 var
-  Rep_Int: Integer;
-  buff   : array [0 .. umlMaxFileRecSize] of umlChar;
+  i: Integer;
+  buff: array [0 .. C_MaxBufferFragmentSize] of Byte;
 begin
-  if dbItem_BlockSeekStartPOS(RecFile, SenderItem) = False then
+  if dbItem_BlockSeekStartPOS(IOHnd, Item_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if SenderItem.Size > umlMaxFileRecSize then
+  if Item_.Size > C_MaxBufferFragmentSize then
     begin
-      for Rep_Int := 1 to (SenderItem.Size div umlMaxFileRecSize) do
+      for i := 1 to (Item_.Size div C_MaxBufferFragmentSize) do
         begin
-          if dbItem_BlockReadData(RecFile, SenderItem, buff, umlMaxFileRecSize) = False then
+          if dbItem_BlockReadData(IOHnd, Item_, buff, C_MaxBufferFragmentSize) = False then
             begin
               Result := False;
-              Exit;
+              exit;
             end;
-          if dbItem_BlockAppendWriteData(DestRecFile, DestItemHnd, buff, umlMaxFileRecSize) = False then
+          if dbItem_BlockAppendWriteData(DestIOHnd, DestItem_, buff, C_MaxBufferFragmentSize) = False then
             begin
-              SenderItem.Return := DestItemHnd.Return;
+              Item_.State := DestItem_.State;
               Result := False;
-              Exit;
+              exit;
             end;
         end;
-      if (SenderItem.Size mod umlMaxFileRecSize) > 0 then
+      if (Item_.Size mod C_MaxBufferFragmentSize) > 0 then
         begin
-          if dbItem_BlockReadData(RecFile, SenderItem, buff, SenderItem.Size mod umlMaxFileRecSize) = False then
+          if dbItem_BlockReadData(IOHnd, Item_, buff, Item_.Size mod C_MaxBufferFragmentSize) = False then
             begin
               Result := False;
-              Exit;
+              exit;
             end;
-          if dbItem_BlockAppendWriteData(DestRecFile, DestItemHnd, buff, SenderItem.Size mod umlMaxFileRecSize) = False then
+          if dbItem_BlockAppendWriteData(DestIOHnd, DestItem_, buff, Item_.Size mod C_MaxBufferFragmentSize) = False then
             begin
-              SenderItem.Return := DestItemHnd.Return;
+              Item_.State := DestItem_.State;
               Result := False;
-              Exit;
+              exit;
             end;
         end;
     end
   else
     begin
-      if dbItem_BlockReadData(RecFile, SenderItem, buff, SenderItem.Size) = False then
+      if dbItem_BlockReadData(IOHnd, Item_, buff, Item_.Size) = False then
         begin
           Result := False;
-          Exit;
+          exit;
         end;
-      if dbItem_BlockAppendWriteData(DestRecFile, DestItemHnd, buff, SenderItem.Size) = False then
+      if dbItem_BlockAppendWriteData(DestIOHnd, DestItem_, buff, Item_.Size) = False then
         begin
-          SenderItem.Return := DestItemHnd.Return;
+          Item_.State := DestItem_.State;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  if dbItem_WriteRec(DestItemHnd.RHeader.CurrentHeader, DestRecFile, DestItemHnd) = False then
+
+  // fixed by qq600585,2018-12
+  // Header has a certain chance of being changed by other item operation during the opening of item
+  if dbHeader_ReadReservedRec(DestItem_.RHeader.CurrentHeader, DestIOHnd, DestItem_.RHeader) = False then
     begin
-      SenderItem.Return := DestItemHnd.Return;
+      Item_.State := DestItem_.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderItem.Return := db_Item_ok;
+  if dbItem_WriteRec(DestItem_.RHeader.CurrentHeader, DestIOHnd, DestItem_) = False then
+    begin
+      Item_.State := DestItem_.State;
+      Result := False;
+      exit;
+    end;
+  Item_.State := DB_Item_ok;
   Result := True;
 end;
 
-function dbField_CopyAllTo(const FilterName: umlString; const fieldPos: Int64; var RecFile: TRecFile; const DestFieldPos: Int64; var DestRecFile: TRecFile): Boolean;
+function dbField_CopyAllTo(const FilterName: U_String; const FieldPos: Int64; var IOHnd: TIOHnd; const DestFieldPos: Int64; var DestIOHnd: TIOHnd): Boolean;
 var
-  _FieldSearch: TFieldSearch;
-  NewField    : TField;
-  NewItem     : TItem;
+  fs: TFieldSearch;
+  NewField: TField;
+  NewItem: TItem;
 begin
-  InitTFieldSearch(_FieldSearch);
-  if dbField_OnlyFindFirstName(FilterName, fieldPos, RecFile, _FieldSearch) then
+  Init_TFieldSearch(fs);
+  if dbField_OnlyFindFirstName(FilterName, FieldPos, IOHnd, fs) then
     begin
       repeat
-        case _FieldSearch.ID of
-          db_Header_FieldID:
+        case fs.ID of
+          DB_Header_Field_ID:
             begin
-              InitTField(NewField);
-              if dbField_ReadRec(_FieldSearch.RHeader.CurrentHeader, RecFile, NewField) then
-                if dbField_CreateField(_FieldSearch.RHeader.Name, DestFieldPos, DestRecFile, NewField) then
-                    dbField_CopyAllTo(FilterName, _FieldSearch.RHeader.CurrentHeader, RecFile, NewField.RHeader.CurrentHeader, DestRecFile);
+              Init_TField(NewField);
+              if dbField_ReadRec(fs.RHeader.CurrentHeader, IOHnd, NewField) then
+                if dbField_CreateField(fs.RHeader.Name, DestFieldPos, DestIOHnd, NewField) then
+                    dbField_CopyAllTo(FilterName, fs.RHeader.CurrentHeader, IOHnd, NewField.RHeader.CurrentHeader, DestIOHnd);
             end;
-          db_Header_ItemID:
+          DB_Header_Item_ID:
             begin
-              if dbItem_ReadRec(_FieldSearch.RHeader.CurrentHeader, RecFile, NewItem) then
+              if dbItem_ReadRec(fs.RHeader.CurrentHeader, IOHnd, NewItem) then
                 begin
-                  dbField_CopyItem(NewItem, RecFile, DestFieldPos, DestRecFile);
+                  dbField_CopyItem(NewItem, IOHnd, DestFieldPos, DestIOHnd);
                 end;
             end;
         end;
-      until not dbField_OnlyFindNextName(RecFile, _FieldSearch);
+      until not dbField_OnlyFindNextName(IOHnd, fs);
     end;
   Result := True;
 end;
 
-function dbPack_CreatePack(const Name, Description: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_CreateNew(const FileName: U_String; var DB_: TObjectDataHandle): Boolean;
 begin
-  if umlFileTest(SenderTMDB.RecFile) = True then
+  if umlFileTest(DB_.IOHnd) then
     begin
-      SenderTMDB.Return := db_Pack_RepCreatePackError;
+      DB_.State := DB_RepCreatePackError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if umlFileCreate(name, SenderTMDB.RecFile) = False then
+  if umlFileCreate(FileName, DB_.IOHnd) = False then
     begin
-      SenderTMDB.Return := db_Pack_CreatePackError;
+      DB_.State := DB_CreatePackError;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDB.MajorVer := db_Pack_MajorVersion;
-  SenderTMDB.MinorVer := db_Pack_MinorVersion;
-  SenderTMDB.CreateTime := umlDefaultTime;
-  SenderTMDB.LastModifyTime := SenderTMDB.CreateTime;
-  SenderTMDB.RootHeaderCount := 0;
-  SenderTMDB.DefaultFieldPOS := db_Pack_Size;
-  SenderTMDB.LastHeaderPOS := SenderTMDB.DefaultFieldPOS;
-  SenderTMDB.FirstHeaderPOS := SenderTMDB.DefaultFieldPOS;
-  SenderTMDB.CurrentFieldPOS := SenderTMDB.DefaultFieldPOS;
-  SenderTMDB.WriteFlags := True;
-  if dbPack_WriteRec(0, SenderTMDB.RecFile, SenderTMDB) = False then
-    begin
-      Result := False;
-      Exit;
-    end;
-  if dbPack_CreateAndSetRootField(db_Pack_DefaultDescription, db_Pack_DefaultDescription, SenderTMDB) = False then
+  FillPtrByte(@DB_.ReservedData[0], DB_ReservedData_Size, 0);
+  DB_.FixedStringL := DB_.IOHnd.FixedStringL;
+  DB_.MajorVer := DB_MajorVersion;
+  DB_.MinorVer := DB_MinorVersion;
+  DB_.CreateTime := umlDefaultTime;
+  DB_.ModificationTime := DB_.CreateTime;
+  DB_.RootHeaderCount := 0;
+  DB_.DefaultFieldPOS := Get_DB_L(DB_.IOHnd);
+  DB_.LastHeaderPOS := DB_.DefaultFieldPOS;
+  DB_.FirstHeaderPOS := DB_.DefaultFieldPOS;
+  DB_.CurrentFieldPOS := DB_.DefaultFieldPOS;
+  if db_WriteRec(0, DB_.IOHnd, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  if db_CreateAndSetRootField(DB_DefaultField, DB_FileDescription, DB_) = False then
+    begin
+      Result := False;
+      exit;
+    end;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_OpenPack(const Name: umlString; var SenderTMDB: TTMDB; _OnlyRead: Boolean): Boolean;
+function db_Open(const FileName: U_String; var DB_: TObjectDataHandle; _OnlyRead: Boolean): Boolean;
 begin
-  if umlFileTest(SenderTMDB.RecFile) = True then
+  if umlFileTest(DB_.IOHnd) then
     begin
-      SenderTMDB.Return := db_Pack_RepOpenPackError;
+      DB_.State := DB_RepOpenPackError;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if umlFileOpen(name, SenderTMDB.RecFile, _OnlyRead) = False then
+  if umlFileOpen(FileName, DB_.IOHnd, _OnlyRead) = False then
     begin
-      SenderTMDB.Return := db_Pack_OpenPackError;
+      DB_.State := DB_OpenPackError;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if dbPack_ReadRec(0, SenderTMDB.RecFile, SenderTMDB) = False then
+  if DB_.IOHnd.Size = 0 then
     begin
-      Result := False;
-      Exit;
-    end;
-
-  SenderTMDB.WriteFlags := False;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_CreateAsStream(Stream: TMixedStream; const Name, Description: umlString; var SenderTMDB: TTMDB): Boolean;
-begin
-  if umlFileTest(SenderTMDB.RecFile) = True then
-    begin
-      SenderTMDB.Return := db_Pack_RepCreatePackError;
-      Result := False;
-      Exit;
-    end;
-  if umlFileCreateAsStream(name, Stream, SenderTMDB.RecFile) = False then
-    begin
-      SenderTMDB.Return := db_Pack_CreatePackError;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.MajorVer := db_Pack_MajorVersion;
-  SenderTMDB.MinorVer := db_Pack_MinorVersion;
-  SenderTMDB.CreateTime := umlDefaultTime;
-  SenderTMDB.LastModifyTime := SenderTMDB.CreateTime;
-  SenderTMDB.RootHeaderCount := 0;
-  SenderTMDB.DefaultFieldPOS := db_Pack_Size;
-  SenderTMDB.LastHeaderPOS := SenderTMDB.DefaultFieldPOS;
-  SenderTMDB.FirstHeaderPOS := SenderTMDB.DefaultFieldPOS;
-  SenderTMDB.CurrentFieldPOS := SenderTMDB.DefaultFieldPOS;
-  SenderTMDB.WriteFlags := True;
-  if dbPack_WriteRec(0, SenderTMDB.RecFile, SenderTMDB) = False then
-    begin
-      Result := False;
-      Exit;
-    end;
-  if dbPack_CreateAndSetRootField(db_Pack_DefaultDescription, db_Pack_DefaultDescription, SenderTMDB) = False then
-    begin
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_OpenAsStream(Stream: TMixedStream; const Name: umlString; var SenderTMDB: TTMDB; _OnlyRead: Boolean): Boolean;
-begin
-  if umlFileTest(SenderTMDB.RecFile) = True then
-    begin
-      SenderTMDB.Return := db_Pack_RepOpenPackError;
-      Result := False;
-      Exit;
-    end;
-
-  if umlFileOpenAsStream(name, Stream, SenderTMDB.RecFile, _OnlyRead) = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenPackError;
-      Result := False;
-      Exit;
-    end;
-
-  if dbPack_ReadRec(0, SenderTMDB.RecFile, SenderTMDB) = False then
-    begin
-      Result := False;
-      Exit;
-    end;
-
-  SenderTMDB.WriteFlags := False;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_ClosePack(var SenderTMDB: TTMDB): Boolean;
-begin
-  if umlFileTest(SenderTMDB.RecFile) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ClosePackError;
-      Result := False;
-      Exit;
-    end;
-  if SenderTMDB.WriteFlags = True then
-    begin
-      SenderTMDB.LastModifyTime := umlDefaultTime;
-      if dbPack_WriteRec(0, SenderTMDB.RecFile, SenderTMDB) = False then
+      FillPtrByte(@DB_.ReservedData[0], DB_ReservedData_Size, 0);
+      DB_.FixedStringL := DB_.IOHnd.FixedStringL;
+      DB_.MajorVer := DB_MajorVersion;
+      DB_.MinorVer := DB_MinorVersion;
+      DB_.CreateTime := umlDefaultTime;
+      DB_.ModificationTime := DB_.CreateTime;
+      DB_.RootHeaderCount := 0;
+      DB_.DefaultFieldPOS := Get_DB_L(DB_.IOHnd);
+      DB_.LastHeaderPOS := DB_.DefaultFieldPOS;
+      DB_.FirstHeaderPOS := DB_.DefaultFieldPOS;
+      DB_.CurrentFieldPOS := DB_.DefaultFieldPOS;
+      if db_WriteRec(0, DB_.IOHnd, DB_) = False then
         begin
           Result := False;
-          Exit;
+          exit;
         end;
-      SenderTMDB.WriteFlags := False;
-    end;
-  if umlFileClose(SenderTMDB.RecFile) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ClosePackError;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_Update(var SenderTMDB: TTMDB): Boolean;
-begin
-  if umlFileTest(SenderTMDB.RecFile) = False then
-    begin
-      SenderTMDB.Return := db_Pack_ClosePackError;
-      Result := False;
-      Exit;
-    end;
-  if SenderTMDB.WriteFlags = True then
-    begin
-      SenderTMDB.LastModifyTime := umlDefaultTime;
-      if dbPack_WriteRec(0, SenderTMDB.RecFile, SenderTMDB) = False then
+      if db_CreateAndSetRootField(DB_DefaultField, DB_FileDescription, DB_) = False then
         begin
           Result := False;
-          Exit;
+          exit;
         end;
-      SenderTMDB.WriteFlags := False;
+      DB_.State := DB_ok;
+      Result := True;
+      exit;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+
+  if db_ReadRec(0, DB_.IOHnd, DB_) = False then
+    begin
+      Result := False;
+      exit;
+    end;
+  if DB_.FixedStringL = 0 then
+      DB_.FixedStringL := DB_.IOHnd.FixedStringL;
+  DB_.IOHnd.FixedStringL := DB_.FixedStringL;
+
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_CopyFieldTo(const FilterName: umlString; var SenderTMDB: TTMDB; const SourceFieldPos: Int64; var DestTMDB: TTMDB; const DestFieldPos: Int64): Boolean;
+function db_CreateAsStream(stream: U_Stream; const Name, Description: U_String; var DB_: TObjectDataHandle): Boolean;
 begin
-  if dbField_CopyAllTo(FilterName, SourceFieldPos, SenderTMDB.RecFile, DestFieldPos, DestTMDB.RecFile) then
+  if umlFileTest(DB_.IOHnd) then
     begin
-      SenderTMDB.Return := db_Pack_ok;
-      DestTMDB.Return := db_Pack_ok;
+      DB_.State := DB_RepCreatePackError;
+      Result := False;
+      exit;
+    end;
+  if umlFileCreateAsStream(Name, stream, DB_.IOHnd) = False then
+    begin
+      DB_.State := DB_CreatePackError;
+      Result := False;
+      exit;
+    end;
+  FillPtrByte(@DB_.ReservedData[0], DB_ReservedData_Size, 0);
+  DB_.FixedStringL := DB_.IOHnd.FixedStringL;
+  DB_.MajorVer := DB_MajorVersion;
+  DB_.MinorVer := DB_MinorVersion;
+  DB_.CreateTime := umlDefaultTime;
+  DB_.ModificationTime := DB_.CreateTime;
+  DB_.RootHeaderCount := 0;
+  DB_.DefaultFieldPOS := Get_DB_L(DB_.IOHnd);
+  DB_.LastHeaderPOS := DB_.DefaultFieldPOS;
+  DB_.FirstHeaderPOS := DB_.DefaultFieldPOS;
+  DB_.CurrentFieldPOS := DB_.DefaultFieldPOS;
+  if db_WriteRec(0, DB_.IOHnd, DB_) = False then
+    begin
+      Result := False;
+      exit;
+    end;
+  if db_CreateAndSetRootField(DB_DefaultField, DB_FileDescription, DB_) = False then
+    begin
+      Result := False;
+      exit;
+    end;
+  DB_.State := DB_ok;
+  Result := True;
+end;
+
+function db_OpenAsStream(stream: U_Stream; const Name: U_String; var DB_: TObjectDataHandle; _OnlyRead: Boolean): Boolean;
+begin
+  if umlFileTest(DB_.IOHnd) then
+    begin
+      DB_.State := DB_RepOpenPackError;
+      Result := False;
+      exit;
+    end;
+
+  if umlFileOpenAsStream(Name, stream, DB_.IOHnd, _OnlyRead) = False then
+    begin
+      DB_.State := DB_OpenPackError;
+      Result := False;
+      exit;
+    end;
+
+  if db_ReadRec(0, DB_.IOHnd, DB_) = False then
+    begin
+      Result := False;
+      exit;
+    end;
+  if DB_.FixedStringL = 0 then
+      DB_.FixedStringL := DB_.IOHnd.FixedStringL;
+  DB_.IOHnd.FixedStringL := DB_.FixedStringL;
+
+  DB_.State := DB_ok;
+  Result := True;
+end;
+
+function db_ClosePack(var DB_: TObjectDataHandle): Boolean;
+begin
+  if umlFileTest(DB_.IOHnd) = False then
+    begin
+      DB_.State := DB_ClosePackError;
+      Result := False;
+      exit;
+    end;
+  if DB_.IOHnd.WriteStated then
+    begin
+      DB_.ModificationTime := umlDefaultTime;
+      if db_WriteRec(0, DB_.IOHnd, DB_) = False then
+        begin
+          Result := False;
+          exit;
+        end;
+    end;
+  if umlFileClose(DB_.IOHnd) = False then
+    begin
+      DB_.State := DB_ClosePackError;
+      Result := False;
+      exit;
+    end;
+  DB_.State := DB_ok;
+  Result := True;
+end;
+
+function db_Update(var DB_: TObjectDataHandle): Boolean;
+begin
+  if umlFileTest(DB_.IOHnd) = False then
+    begin
+      DB_.State := DB_ClosePackError;
+      Result := False;
+      exit;
+    end;
+  if DB_.IOHnd.WriteStated then
+    begin
+      DB_.ModificationTime := umlDefaultTime;
+      if db_WriteRec(0, DB_.IOHnd, DB_) = False then
+        begin
+          Result := False;
+          exit;
+        end;
+    end;
+  DB_.State := DB_ok;
+  Result := umlFileUpdate(DB_.IOHnd);
+end;
+
+function db_CopyFieldTo(const FilterName: U_String; var DB_: TObjectDataHandle; const SourceFieldPos: Int64; var DestTMDB: TObjectDataHandle; const DestFieldPos: Int64): Boolean;
+begin
+  if dbField_CopyAllTo(FilterName, SourceFieldPos, DB_.IOHnd, DestFieldPos, DestTMDB.IOHnd) then
+    begin
+      DB_.State := DB_ok;
+      DestTMDB.State := DB_ok;
       Result := True;
     end
   else
     begin
-      SenderTMDB.Return := db_Pack_CreatePackError;
-      DestTMDB.Return := db_Pack_CreatePackError;
+      DB_.State := DB_CreatePackError;
+      DestTMDB.State := DB_CreatePackError;
       Result := False;
     end;
 end;
 
-function dbPack_CopyAllTo(var SenderTMDB: TTMDB; var DestTMDB: TTMDB): Boolean;
+function db_CopyAllTo(var DB_: TObjectDataHandle; var DestTMDB: TObjectDataHandle): Boolean;
 begin
-  Result := dbPack_CopyFieldTo('*', SenderTMDB, SenderTMDB.DefaultFieldPOS, DestTMDB, DestTMDB.DefaultFieldPOS);
+  Result := db_CopyFieldTo('*', DB_, DB_.DefaultFieldPOS, DestTMDB, DestTMDB.DefaultFieldPOS);
 end;
 
-function dbPack_CopyAllToDestPath(var SenderTMDB: TTMDB; var DestTMDB: TTMDB; DestPath: umlString): Boolean;
+function db_CopyAllToDestPath(var DB_: TObjectDataHandle; var DestTMDB: TObjectDataHandle; destPath: U_String): Boolean;
 var
   f: TField;
 begin
   Result := False;
-  dbPack_CreateField(DestPath, '', DestTMDB);
-  if dbPack_GetField(DestPath, f, DestTMDB) then
+  db_CreateField(destPath, '', DestTMDB);
+  if db_GetField(destPath, f, DestTMDB) then
     begin
-      Result := dbPack_CopyFieldTo('*', SenderTMDB, SenderTMDB.DefaultFieldPOS, DestTMDB, f.RHeader.CurrentHeader);
+      Result := db_CopyFieldTo('*', DB_, DB_.DefaultFieldPOS, DestTMDB, f.RHeader.CurrentHeader);
     end;
 end;
 
-function dbPack_TestNameStr(const Name: umlString): Boolean;
+function db_TestName(const Name: U_String): Boolean;
 begin
-  Result := umlGetLength(umlDelLimitChar(name, db_FieldPathLimitChar + #9#32#13#10)) > 0;
+  Result := umlDeleteChar(Name, db_FieldPathLimitChar + #9#32#13#10).Len > 0;
 end;
 
-function dbPack_AutoCheckRootField(const Name: umlString; var SenderField: TField; var SenderTMDB: TTMDB): Boolean;
+function db_CheckRootField(const Name: U_String; var Field_: TField; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbPack_TestNameStr(name) = False then
+  if db_TestName(Name) = False then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
-      SenderField.Return := SenderTMDB.Return;
+      DB_.State := DB_PathNameError;
+      Field_.State := DB_.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if dbPack_GetRootField(name, f, SenderTMDB) = False then
+  if db_GetRootField(Name, f, DB_) = False then
     begin
-      if dbPack_CreateRootHeader(name, db_Header_FieldID, SenderTMDB, SenderField.RHeader) = False then
+      if db_CreateRootHeader(Name, DB_Header_Field_ID, DB_, Field_.RHeader) = False then
         begin
-          SenderTMDB.Return := SenderField.RHeader.Return;
-          SenderField.Return := SenderTMDB.Return;
+          DB_.State := Field_.RHeader.State;
+          Field_.State := DB_.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      SenderField.HeaderCount := 0;
-      SenderField.UpLevelFieldPOS := -1;
-      if dbField_OnlyWriteFieldRec(SenderField.RHeader.DataMainPOS, SenderTMDB.RecFile, SenderField) = False then
+      Field_.HeaderCount := 0;
+      Field_.UpFieldPOS := -1;
+      if dbField_OnlyWriteFieldRec(Field_.RHeader.DataPosition, DB_.IOHnd, Field_) = False then
         begin
-          SenderTMDB.Return := SenderField.Return;
-          SenderField.Return := SenderTMDB.Return;
+          DB_.State := Field_.State;
+          Field_.State := DB_.State;
           Result := False;
-          Exit;
+          exit;
         end;
     end
   else
     begin
-      SenderField := f;
+      Field_ := f;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_CreateRootHeader(const Name: umlString; const ID: Byte; var SenderTMDB: TTMDB; var SenderHeader: THeader): Boolean;
+function db_CreateRootHeader(const Name: U_String; const ID: Byte; var DB_: TObjectDataHandle; var Header_: THeader): Boolean;
 var
-  _Header: THeader;
+  Header: THeader;
 begin
-  SenderHeader.ID := ID;
-  SenderHeader.Name := name;
-  case SenderTMDB.RootHeaderCount of
+  Header_.ID := ID;
+  Header_.Name := Name;
+  case DB_.RootHeaderCount of
     0:
       begin
-        SenderTMDB.RootHeaderCount := 1;
-        SenderTMDB.FirstHeaderPOS := umlFileGetSize(SenderTMDB.RecFile);
-        SenderTMDB.LastHeaderPOS := SenderTMDB.FirstHeaderPOS;
-        SenderTMDB.LastModifyTime := umlDefaultTime;
-        SenderHeader.PositionID := db_Header_OnlyPositionFlags;
-        SenderHeader.NextHeader := SenderTMDB.LastHeaderPOS;
-        SenderHeader.PrevHeader := SenderTMDB.FirstHeaderPOS;
-        SenderHeader.CurrentHeader := SenderTMDB.FirstHeaderPOS;
-        SenderHeader.CreateTime := umlDefaultTime;
-        SenderHeader.LastModifyTime := umlDefaultTime;
-        SenderHeader.DataMainPOS := SenderHeader.CurrentHeader + db_Header_Size;
-        if dbHeader_WriteRec(SenderHeader.CurrentHeader, SenderTMDB.RecFile, SenderHeader) = False then
+        DB_.RootHeaderCount := 1;
+        DB_.FirstHeaderPOS := umlFileGetSize(DB_.IOHnd);
+        DB_.LastHeaderPOS := DB_.FirstHeaderPOS;
+        DB_.ModificationTime := umlDefaultTime;
+        Header_.PositionID := DB_Header_1;
+        Header_.NextHeader := DB_.LastHeaderPOS;
+        Header_.PrevHeader := DB_.FirstHeaderPOS;
+        Header_.CurrentHeader := DB_.FirstHeaderPOS;
+        Header_.CreateTime := umlDefaultTime;
+        Header_.ModificationTime := umlDefaultTime;
+        Header_.DataPosition := Header_.CurrentHeader + Get_DB_HeaderL(DB_.IOHnd);
+        if dbHeader_WriteRec(Header_.CurrentHeader, DB_.IOHnd, Header_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
       end;
     1:
       begin
-        SenderHeader.CurrentHeader := umlFileGetSize(SenderTMDB.RecFile);
-        SenderHeader.NextHeader := SenderTMDB.FirstHeaderPOS;
-        SenderHeader.PrevHeader := SenderTMDB.FirstHeaderPOS;
-        if dbHeader_ReadRec(SenderTMDB.FirstHeaderPOS, SenderTMDB.RecFile, _Header) = False then
+        Header_.CurrentHeader := umlFileGetSize(DB_.IOHnd);
+        Header_.NextHeader := DB_.FirstHeaderPOS;
+        Header_.PrevHeader := DB_.FirstHeaderPOS;
+        if dbHeader_ReadRec(DB_.FirstHeaderPOS, DB_.IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        _Header.PrevHeader := SenderHeader.CurrentHeader;
-        _Header.NextHeader := SenderHeader.CurrentHeader;
-        _Header.PositionID := db_Header_FirstPositionFlags;
-        if dbHeader_WriteRec(SenderTMDB.FirstHeaderPOS, SenderTMDB.RecFile, _Header) = False then
+        Header.PrevHeader := Header_.CurrentHeader;
+        Header.NextHeader := Header_.CurrentHeader;
+        Header.PositionID := DB_Header_First;
+        if dbHeader_WriteRec(DB_.FirstHeaderPOS, DB_.IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        SenderTMDB.RootHeaderCount := SenderTMDB.RootHeaderCount + 1;
-        SenderTMDB.LastHeaderPOS := SenderHeader.CurrentHeader;
-        SenderTMDB.LastModifyTime := umlDefaultTime;
-        SenderHeader.CreateTime := umlDefaultTime;
-        SenderHeader.LastModifyTime := umlDefaultTime;
-        SenderHeader.DataMainPOS := SenderHeader.CurrentHeader + db_Header_Size;
-        SenderHeader.PositionID := db_Header_LastPositionFlags;
-        if dbHeader_WriteRec(SenderHeader.CurrentHeader, SenderTMDB.RecFile, SenderHeader) = False then
+        DB_.RootHeaderCount := DB_.RootHeaderCount + 1;
+        DB_.LastHeaderPOS := Header_.CurrentHeader;
+        DB_.ModificationTime := umlDefaultTime;
+        Header_.CreateTime := umlDefaultTime;
+        Header_.ModificationTime := umlDefaultTime;
+        Header_.DataPosition := Header_.CurrentHeader + Get_DB_HeaderL(DB_.IOHnd);
+        Header_.PositionID := DB_Header_Last;
+        if dbHeader_WriteRec(Header_.CurrentHeader, DB_.IOHnd, Header_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
       end;
     else
       begin
-        SenderHeader.CurrentHeader := umlFileGetSize(SenderTMDB.RecFile);
-        if dbHeader_ReadRec(SenderTMDB.FirstHeaderPOS, SenderTMDB.RecFile, _Header) = False then
+        Header_.CurrentHeader := umlFileGetSize(DB_.IOHnd);
+        if dbHeader_ReadRec(DB_.FirstHeaderPOS, DB_.IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        _Header.PrevHeader := SenderHeader.CurrentHeader;
-        SenderHeader.NextHeader := _Header.CurrentHeader;
-        if dbHeader_WriteRec(SenderTMDB.FirstHeaderPOS, SenderTMDB.RecFile, _Header) = False then
+        Header.PrevHeader := Header_.CurrentHeader;
+        Header_.NextHeader := Header.CurrentHeader;
+        if dbHeader_WriteRec(DB_.FirstHeaderPOS, DB_.IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        if dbHeader_ReadRec(SenderTMDB.LastHeaderPOS, SenderTMDB.RecFile, _Header) = False then
+        if dbHeader_ReadRec(DB_.LastHeaderPOS, DB_.IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        _Header.NextHeader := SenderHeader.CurrentHeader;
-        SenderHeader.PrevHeader := SenderTMDB.LastHeaderPOS;
-        _Header.PositionID := db_Header_MediumPositionFlags;
-        if dbHeader_WriteRec(SenderTMDB.LastHeaderPOS, SenderTMDB.RecFile, _Header) = False then
+        Header.NextHeader := Header_.CurrentHeader;
+        Header_.PrevHeader := DB_.LastHeaderPOS;
+        Header.PositionID := DB_Header_Medium;
+        if dbHeader_WriteRec(DB_.LastHeaderPOS, DB_.IOHnd, Header) = False then
           begin
-            SenderHeader.Return := _Header.Return;
+            Header_.State := Header.State;
             Result := False;
-            Exit;
+            exit;
           end;
-        SenderTMDB.RootHeaderCount := SenderTMDB.RootHeaderCount + 1;
-        SenderTMDB.LastHeaderPOS := SenderHeader.CurrentHeader;
-        SenderTMDB.LastModifyTime := umlDefaultTime;
-        SenderHeader.CreateTime := umlDefaultTime;
-        SenderHeader.LastModifyTime := umlDefaultTime;
-        SenderHeader.DataMainPOS := SenderHeader.CurrentHeader + db_Header_Size;
-        SenderHeader.PositionID := db_Header_LastPositionFlags;
-        if dbHeader_WriteRec(SenderHeader.CurrentHeader, SenderTMDB.RecFile, SenderHeader) = False then
+        DB_.RootHeaderCount := DB_.RootHeaderCount + 1;
+        DB_.LastHeaderPOS := Header_.CurrentHeader;
+        DB_.ModificationTime := umlDefaultTime;
+        Header_.CreateTime := umlDefaultTime;
+        Header_.ModificationTime := umlDefaultTime;
+        Header_.DataPosition := Header_.CurrentHeader + Get_DB_HeaderL(DB_.IOHnd);
+        Header_.PositionID := DB_Header_Last;
+        if dbHeader_WriteRec(Header_.CurrentHeader, DB_.IOHnd, Header_) = False then
           begin
             Result := False;
-            Exit;
+            exit;
           end;
       end;
   end;
 
-  if SenderTMDB.WriteFlags = False then
-      SenderTMDB.WriteFlags := True;
-  SenderHeader.Return := db_Header_ok;
+  Header_.State := DB_Header_ok;
   Result := True;
 end;
 
-function dbPack_CreateRootField(const Name, Description: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_CreateRootField(const Name, Description: U_String; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbPack_TestNameStr(name) = False then
+  if db_TestName(Name) = False then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if dbPack_ExistsRootField(name, SenderTMDB) = True then
+  if db_ExistsRootField(Name, DB_) then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbPack_CreateRootHeader(name, db_Header_FieldID, SenderTMDB, f.RHeader) = False then
+  if db_CreateRootHeader(Name, DB_Header_Field_ID, DB_, f.RHeader) = False then
     begin
-      SenderTMDB.Return := f.RHeader.Return;
+      DB_.State := f.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
   f.Description := Description;
   f.HeaderCount := 0;
-  f.UpLevelFieldPOS := -1;
-  if dbField_OnlyWriteFieldRec(f.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  f.UpFieldPOS := -1;
+  if dbField_OnlyWriteFieldRec(f.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_CreateAndSetRootField(const Name, Description: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_CreateAndSetRootField(const Name, Description: U_String; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbPack_TestNameStr(name) = False then
+  if db_TestName(Name) = False then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if dbPack_ExistsRootField(name, SenderTMDB) = True then
+  if db_ExistsRootField(Name, DB_) then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbPack_CreateRootHeader(name, db_Header_FieldID, SenderTMDB, f.RHeader) = False then
+  if db_CreateRootHeader(Name, DB_Header_Field_ID, DB_, f.RHeader) = False then
     begin
-      SenderTMDB.Return := f.RHeader.Return;
+      DB_.State := f.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
   f.Description := Description;
   f.HeaderCount := 0;
-  f.UpLevelFieldPOS := -1;
-  if dbField_OnlyWriteFieldRec(f.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  f.UpFieldPOS := -1;
+  if dbField_OnlyWriteFieldRec(f.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDB.DefaultFieldPOS := f.RHeader.CurrentHeader;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.DefaultFieldPOS := f.RHeader.CurrentHeader;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_CreateField(const PathName, Description: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_CreateField(const pathName, Description: U_String; var DB_: TObjectDataHandle): Boolean;
 var
-  f                        : TField;
-  _FieldSearch             : TFieldSearch;
-  Rep_Int, _PathCount      : Integer;
-  TempPathStr, TempPathName: umlString;
+  f: TField;
+  fs: TFieldSearch;
+  i, PC: Integer;
+  TempPathStr, TempPathName: U_String;
 begin
-  if umlFileTest(SenderTMDB.RecFile) = False then
+  if umlFileTest(DB_.IOHnd) = False then
     begin
-      SenderTMDB.Return := db_Pack_ClosePackError;
+      DB_.State := DB_ClosePackError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_ReadRec(SenderTMDB.DefaultFieldPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_ReadRec(DB_.DefaultFieldPOS, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if umlGetLength(PathName) = 0 then
+  if umlGetLength(pathName) = 0 then
     begin
-      SenderTMDB.Return := db_Pack_ok;
+      DB_.State := DB_ok;
       Result := True;
-      Exit;
+      exit;
     end;
-  TempPathName := PathName;
-  _PathCount := dbPack_GetIndexStrCount(TempPathName);
-  if _PathCount > 0 then
+  TempPathName := pathName;
+  PC := db_GetPathCount(TempPathName);
+  if PC > 0 then
     begin
-      for Rep_Int := 1 to _PathCount do
+      for i := 1 to PC do
         begin
-          TempPathStr := dbPack_GetFirstPath(TempPathName);
-          TempPathName := dbPack_MaskFirstPath(TempPathName);
+          TempPathStr := db_GetFirstPath(TempPathName);
+          TempPathName := db_DeleteFirstPath(TempPathName);
 
-          if dbPack_TestNameStr(TempPathStr) = False then
+          if db_TestName(TempPathStr) = False then
             begin
-              SenderTMDB.Return := db_Pack_PathNameError;
+              DB_.State := DB_PathNameError;
               Result := False;
-              Exit;
+              exit;
             end;
-          case dbField_FindFirst(TempPathStr, db_Header_FieldID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, _FieldSearch) of
+          case dbField_FindFirst(TempPathStr, DB_Header_Field_ID, f.RHeader.CurrentHeader, DB_.IOHnd, fs) of
             False:
               begin
                 f.Description := Description;
-                if dbField_CreateField(TempPathStr, f.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+                if dbField_CreateField(TempPathStr, f.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
                   begin
-                    SenderTMDB.Return := f.Return;
+                    DB_.State := f.State;
                     Result := False;
-                    Exit;
+                    exit;
                   end;
               end;
             True:
               begin
-                if dbField_ReadRec(_FieldSearch.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+                if dbField_ReadRec(fs.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
                   begin
-                    SenderTMDB.Return := f.Return;
+                    DB_.State := f.State;
                     Result := False;
-                    Exit;
+                    exit;
                   end;
               end;
           end;
         end;
     end;
-  SenderTMDB.WriteFlags := True;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_SetFieldName(const PathName, OriginFieldName, NewFieldName, FieldDescription: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_SetFieldName(const pathName, OriginFieldName, NewFieldName, FieldDescription: U_String; var DB_: TObjectDataHandle): Boolean;
 var
-  TempSR     : TFieldSearch;
-  f          : TField;
+  TempSR: TFieldSearch;
+  f: TField;
   OriginField: TField;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirst(OriginFieldName, db_Header_FieldID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = False then
+  if dbField_FindFirst(OriginFieldName, DB_Header_Field_ID, f.RHeader.CurrentHeader, DB_.IOHnd, TempSR) = False then
     begin
-      SenderTMDB.Return := TempSR.Return;
+      DB_.State := TempSR.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_ReadRec(TempSR.RHeader.CurrentHeader, SenderTMDB.RecFile, OriginField) = False then
+  if dbField_ReadRec(TempSR.RHeader.CurrentHeader, DB_.IOHnd, OriginField) = False then
     begin
-      SenderTMDB.Return := OriginField.RHeader.Return;
+      DB_.State := OriginField.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
   OriginField.RHeader.Name := NewFieldName;
   OriginField.Description := FieldDescription;
-  if dbField_WriteRec(OriginField.RHeader.CurrentHeader, SenderTMDB.RecFile, OriginField) = False then
+  if dbField_WriteRec(OriginField.RHeader.CurrentHeader, DB_.IOHnd, OriginField) = False then
     begin
-      SenderTMDB.Return := OriginField.RHeader.Return;
+      DB_.State := OriginField.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_SetItemName(const PathName, OriginItemName, NewItemName, ItemDescription: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_SetItemName(const pathName, OriginItemName, NewItemName, ItemDescription: U_String; var DB_: TObjectDataHandle): Boolean;
 var
-  TempSR    : TFieldSearch;
-  f         : TField;
+  TempSR: TFieldSearch;
+  f: TField;
   OriginItem: TItem;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirst(OriginItemName, db_Header_ItemID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = False then
+  if dbField_FindFirst(OriginItemName, DB_Header_Item_ID, f.RHeader.CurrentHeader, DB_.IOHnd, TempSR) = False then
     begin
-      SenderTMDB.Return := TempSR.Return;
+      DB_.State := TempSR.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_ReadRec(TempSR.RHeader.CurrentHeader, SenderTMDB.RecFile, OriginItem) = False then
+  if dbItem_ReadRec(TempSR.RHeader.CurrentHeader, DB_.IOHnd, OriginItem) = False then
     begin
-      SenderTMDB.Return := OriginItem.RHeader.Return;
+      DB_.State := OriginItem.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
   OriginItem.RHeader.Name := NewItemName;
   OriginItem.Description := ItemDescription;
-  if dbItem_WriteRec(OriginItem.RHeader.CurrentHeader, SenderTMDB.RecFile, OriginItem) = False then
+  if dbItem_WriteRec(OriginItem.RHeader.CurrentHeader, DB_.IOHnd, OriginItem) = False then
     begin
-      SenderTMDB.Return := OriginItem.RHeader.Return;
+      DB_.State := OriginItem.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_DeleteField(const PathName, FilterName: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_DeleteField(const pathName, FilterName: U_String; var DB_: TObjectDataHandle): Boolean;
 var
   TempSR: TFieldSearch;
-  f     : TField;
+  f: TField;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirst(FilterName, db_Header_FieldID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = False then
+  if dbField_FindFirst(FilterName, DB_Header_Field_ID, f.RHeader.CurrentHeader, DB_.IOHnd, TempSR) = False then
     begin
-      SenderTMDB.Return := TempSR.Return;
+      DB_.State := TempSR.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+  if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  while dbField_FindFirst(FilterName, db_Header_FieldID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = True do
+  while dbField_FindFirst(FilterName, DB_Header_Field_ID, f.RHeader.CurrentHeader, DB_.IOHnd, TempSR) do
     begin
-      if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+      if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
         begin
-          SenderTMDB.Return := f.Return;
+          DB_.State := f.State;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_DeleteHeader(const PathName, FilterName: umlString; const ID: Byte; var SenderTMDB: TTMDB): Boolean;
+function db_DeleteHeader(const pathName, FilterName: U_String; const ID: Byte; var DB_: TObjectDataHandle): Boolean;
 var
   TempSR: TFieldSearch;
-  f     : TField;
+  f: TField;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirst(FilterName, ID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = False then
+  if dbField_FindFirst(FilterName, ID, f.RHeader.CurrentHeader, DB_.IOHnd, TempSR) = False then
     begin
-      SenderTMDB.Return := TempSR.Return;
+      DB_.State := TempSR.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+  if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  while dbField_FindFirst(FilterName, ID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = True do
+  while dbField_FindFirst(FilterName, ID, f.RHeader.CurrentHeader, DB_.IOHnd, TempSR) do
     begin
-      if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+      if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
         begin
-          SenderTMDB.Return := f.Return;
+          DB_.State := f.State;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_MoveItem(const SourcerPathName, FilterName: umlString; const TargetPathName: umlString; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean;
+function db_MoveItem(const SourcerPathName, FilterName: U_String; const TargetPathName: U_String; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
 var
-  TempSR                   : TFieldSearch;
+  TempSR: TFieldSearch;
   SourcerField, TargetField: TField;
 begin
-  if dbPack_GetField(SourcerPathName, SourcerField, SenderTMDB) = False then
+  if db_GetField(SourcerPathName, SourcerField, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbPack_GetField(TargetPathName, TargetField, SenderTMDB) = False then
+  if db_GetField(TargetPathName, TargetField, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
 
   if SourcerField.RHeader.CurrentHeader = TargetField.RHeader.CurrentHeader then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirstItem(FilterName, ItemExtID, SourcerField.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = False then
+  if dbField_FindFirstItem(FilterName, ItemExtID, SourcerField.RHeader.CurrentHeader, DB_.IOHnd, TempSR) = False then
     begin
-      SenderTMDB.Return := TempSR.Return;
+      DB_.State := TempSR.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
   if TempSR.RHeader.CurrentHeader = TargetField.RHeader.CurrentHeader then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, SenderTMDB.RecFile, TargetField) = False then
+  if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, DB_.IOHnd, TargetField) = False then
     begin
-      SenderTMDB.Return := TargetField.Return;
+      DB_.State := TargetField.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  while dbField_FindFirstItem(FilterName, ItemExtID, SourcerField.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = True do
+  while dbField_FindFirstItem(FilterName, ItemExtID, SourcerField.RHeader.CurrentHeader, DB_.IOHnd, TempSR) do
     begin
       if TempSR.RHeader.CurrentHeader = TargetField.RHeader.CurrentHeader then
         begin
-          SenderTMDB.Return := db_Pack_PathNameError;
+          DB_.State := DB_PathNameError;
           Result := False;
-          Exit;
+          exit;
         end;
-      if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, SenderTMDB.RecFile, TargetField) = False
+      if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, DB_.IOHnd, TargetField) = False
       then
         begin
-          SenderTMDB.Return := TargetField.Return;
+          DB_.State := TargetField.State;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_MoveField(const SourcerPathName, FilterName: umlString; const TargetPathName: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_MoveField(const SourcerPathName, FilterName: U_String; const TargetPathName: U_String; var DB_: TObjectDataHandle): Boolean;
 var
-  TempSR                   : TFieldSearch;
+  TempSR: TFieldSearch;
   SourcerField, TargetField: TField;
 begin
-  if dbPack_GetField(SourcerPathName, SourcerField, SenderTMDB) = False then
+  if db_GetField(SourcerPathName, SourcerField, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbPack_GetField(TargetPathName, TargetField, SenderTMDB) = False then
+  if db_GetField(TargetPathName, TargetField, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
 
   if SourcerField.RHeader.CurrentHeader = TargetField.RHeader.CurrentHeader then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirst(FilterName, db_Header_FieldID, SourcerField.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = False then
+  if dbField_FindFirst(FilterName, DB_Header_Field_ID, SourcerField.RHeader.CurrentHeader, DB_.IOHnd, TempSR) = False then
     begin
-      SenderTMDB.Return := TempSR.Return;
+      DB_.State := TempSR.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
   if TempSR.RHeader.CurrentHeader = TargetField.RHeader.CurrentHeader then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, SenderTMDB.RecFile, TargetField) = False then
+  if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, DB_.IOHnd, TargetField) = False then
     begin
-      SenderTMDB.Return := TargetField.Return;
+      DB_.State := TargetField.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  while dbField_FindFirst(FilterName, db_Header_FieldID, SourcerField.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = True do
+  while dbField_FindFirst(FilterName, DB_Header_Field_ID, SourcerField.RHeader.CurrentHeader, DB_.IOHnd, TempSR) do
     begin
       if TempSR.RHeader.CurrentHeader = TargetField.RHeader.CurrentHeader then
         begin
-          SenderTMDB.Return := db_Pack_PathNameError;
+          DB_.State := DB_PathNameError;
           Result := False;
-          Exit;
+          exit;
         end;
-      if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, SenderTMDB.RecFile, TargetField) = False
+      if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, DB_.IOHnd, TargetField) = False
       then
         begin
-          SenderTMDB.Return := TargetField.Return;
+          DB_.State := TargetField.State;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_MoveHeader(const SourcerPathName, FilterName: umlString; const TargetPathName: umlString; const HeaderID: Byte; var SenderTMDB: TTMDB): Boolean;
+function db_MoveHeader(const SourcerPathName, FilterName: U_String; const TargetPathName: U_String; const HeaderID: Byte; var DB_: TObjectDataHandle): Boolean;
 var
-  TempSR                   : TFieldSearch;
+  TempSR: TFieldSearch;
   SourcerField, TargetField: TField;
 begin
-  if dbPack_GetField(SourcerPathName, SourcerField, SenderTMDB) = False then
+  if db_GetField(SourcerPathName, SourcerField, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbPack_GetField(TargetPathName, TargetField, SenderTMDB) = False then
+  if db_GetField(TargetPathName, TargetField, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
 
   if SourcerField.RHeader.CurrentHeader = TargetField.RHeader.CurrentHeader then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirst(FilterName, HeaderID, SourcerField.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = False then
+  if dbField_FindFirst(FilterName, HeaderID, SourcerField.RHeader.CurrentHeader, DB_.IOHnd, TempSR) = False then
     begin
-      SenderTMDB.Return := TempSR.Return;
+      DB_.State := TempSR.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
   if TempSR.RHeader.CurrentHeader = TargetField.RHeader.CurrentHeader then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, SenderTMDB.RecFile, TargetField) = False then
+  if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, DB_.IOHnd, TargetField) = False then
     begin
-      SenderTMDB.Return := TargetField.Return;
+      DB_.State := TargetField.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  while dbField_FindFirst(FilterName, HeaderID, SourcerField.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = True do
+  while dbField_FindFirst(FilterName, HeaderID, SourcerField.RHeader.CurrentHeader, DB_.IOHnd, TempSR) do
     begin
       if TempSR.RHeader.CurrentHeader = TargetField.RHeader.CurrentHeader then
         begin
-          SenderTMDB.Return := db_Pack_PathNameError;
+          DB_.State := DB_PathNameError;
           Result := False;
-          Exit;
+          exit;
         end;
-      if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, SenderTMDB.RecFile, TargetField) = False
+      if dbField_MoveHeader(TempSR.RHeader.CurrentHeader, SourcerField.RHeader.CurrentHeader, TargetField.RHeader.CurrentHeader, DB_.IOHnd, TargetField) = False
       then
         begin
-          SenderTMDB.Return := TargetField.Return;
+          DB_.State := TargetField.State;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_SetCurrentRootField(const Name: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_SetCurrentRootField(const Name: U_String; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if SenderTMDB.RootHeaderCount = 0 then
+  if DB_.RootHeaderCount = 0 then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_ReadRec(SenderTMDB.DefaultFieldPOS, SenderTMDB.RecFile, f.RHeader) = False then
+  if dbHeader_ReadRec(DB_.DefaultFieldPOS, DB_.IOHnd, f.RHeader) = False then
     begin
-      SenderTMDB.Return := f.RHeader.Return;
+      DB_.State := f.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if (dbHeader_MultipleMatch(name, f.RHeader.Name) = True) and (f.RHeader.ID = db_Header_FieldID) then
+  if (dbMultipleMatch(Name, f.RHeader.Name) = True) and (f.RHeader.ID = DB_Header_Field_ID) then
     begin
-      SenderTMDB.DefaultFieldPOS := f.RHeader.CurrentHeader;
-      SenderTMDB.Return := db_Pack_ok;
+      DB_.DefaultFieldPOS := f.RHeader.CurrentHeader;
+      DB_.State := DB_ok;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  if SenderTMDB.RootHeaderCount = 1 then
+  if DB_.RootHeaderCount = 1 then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_ReadRec(f.RHeader.NextHeader, SenderTMDB.RecFile, f.RHeader) = False then
+  if dbHeader_ReadRec(f.RHeader.NextHeader, DB_.IOHnd, f.RHeader) = False then
     begin
-      SenderTMDB.Return := f.RHeader.Return;
+      DB_.State := f.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if (dbHeader_MultipleMatch(name, f.RHeader.Name) = True) and (f.RHeader.ID = db_Header_FieldID) then
+  if (dbMultipleMatch(Name, f.RHeader.Name) = True) and (f.RHeader.ID = DB_Header_Field_ID) then
     begin
-      SenderTMDB.DefaultFieldPOS := f.RHeader.CurrentHeader;
-      SenderTMDB.Return := db_Pack_ok;
+      DB_.DefaultFieldPOS := f.RHeader.CurrentHeader;
+      DB_.State := DB_ok;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  while f.RHeader.CurrentHeader <> SenderTMDB.DefaultFieldPOS do
+  while f.RHeader.CurrentHeader <> DB_.DefaultFieldPOS do
     begin
-      if dbHeader_ReadRec(f.RHeader.NextHeader, SenderTMDB.RecFile, f.RHeader) = False then
+      if dbHeader_ReadRec(f.RHeader.NextHeader, DB_.IOHnd, f.RHeader) = False then
         begin
-          SenderTMDB.Return := f.RHeader.Return;
+          DB_.State := f.RHeader.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      if (dbHeader_MultipleMatch(name, f.RHeader.Name) = True) and (f.RHeader.ID = db_Header_FieldID) then
+      if (dbMultipleMatch(Name, f.RHeader.Name) = True) and (f.RHeader.ID = DB_Header_Field_ID) then
         begin
-          SenderTMDB.DefaultFieldPOS := f.RHeader.CurrentHeader;
-          SenderTMDB.Return := db_Pack_ok;
+          DB_.DefaultFieldPOS := f.RHeader.CurrentHeader;
+          DB_.State := DB_ok;
           Result := True;
-          Exit;
+          exit;
         end;
     end;
-  SenderTMDB.Return := db_Pack_PathNameError;
+  DB_.State := DB_PathNameError;
   Result := False;
 end;
 
-function dbPack_SetCurrentField(const PathName: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_SetCurrentField(const pathName: U_String; var DB_: TObjectDataHandle): Boolean;
 var
-  f                        : TField;
-  _FieldSearch             : TFieldSearch;
-  Rep_Int, _PathCount      : Integer;
-  TempPathStr, TempPathName: umlString;
+  f: TField;
+  fs: TFieldSearch;
+  i, PC: Integer;
+  TempPathStr, TempPathName: U_String;
 begin
-  if umlFileTest(SenderTMDB.RecFile) = False then
+  if umlFileTest(DB_.IOHnd) = False then
     begin
-      SenderTMDB.Return := db_Pack_ClosePackError;
+      DB_.State := DB_ClosePackError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_ReadRec(SenderTMDB.DefaultFieldPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_ReadRec(DB_.DefaultFieldPOS, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if umlGetLength(PathName) = 0 then
+  if umlGetLength(pathName) = 0 then
     begin
-      SenderTMDB.CurrentFieldPOS := f.RHeader.CurrentHeader;
-      SenderTMDB.CurrentFieldLevel := 1;
-      SenderTMDB.Return := db_Pack_ok;
+      DB_.CurrentFieldPOS := f.RHeader.CurrentHeader;
+      DB_.CurrentFieldLevel := 1;
+      DB_.State := DB_ok;
       Result := True;
-      Exit;
+      exit;
     end;
-  TempPathName := PathName;
-  _PathCount := dbPack_GetIndexStrCount(TempPathName);
-  if _PathCount > 0 then
+  TempPathName := pathName;
+  PC := db_GetPathCount(TempPathName);
+  if PC > 0 then
     begin
-      for Rep_Int := 1 to _PathCount do
+      for i := 1 to PC do
         begin
-          TempPathStr := dbPack_GetFirstPath(TempPathName);
-          TempPathName := dbPack_MaskFirstPath(TempPathName);
+          TempPathStr := db_GetFirstPath(TempPathName);
+          TempPathName := db_DeleteFirstPath(TempPathName);
 
-          if dbPack_TestNameStr(TempPathStr) = False then
+          if db_TestName(TempPathStr) = False then
             begin
-              SenderTMDB.Return := db_Pack_PathNameError;
+              DB_.State := DB_PathNameError;
               Result := False;
-              Exit;
+              exit;
             end;
-          if dbField_FindFirst(TempPathStr, db_Header_FieldID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, _FieldSearch) = False then
+          if dbField_FindFirst(TempPathStr, DB_Header_Field_ID, f.RHeader.CurrentHeader, DB_.IOHnd, fs) = False then
             begin
-              SenderTMDB.Return := _FieldSearch.Return;
+              DB_.State := fs.State;
               Result := False;
-              Exit;
+              exit;
             end;
-          if dbField_ReadRec(_FieldSearch.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+          if dbField_ReadRec(fs.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
             begin
-              SenderTMDB.Return := f.Return;
+              DB_.State := f.State;
               Result := False;
-              Exit;
+              exit;
             end;
         end;
     end;
-  SenderTMDB.CurrentFieldPOS := f.RHeader.CurrentHeader;
-  SenderTMDB.CurrentFieldLevel := _PathCount;
-  SenderTMDB.WriteFlags := True;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.CurrentFieldPOS := f.RHeader.CurrentHeader;
+  DB_.CurrentFieldLevel := PC;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_GetRootField(const Name: umlString; var SenderField: TField; var SenderTMDB: TTMDB): Boolean;
+function db_GetRootField(const Name: U_String; var Field_: TField; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  InitTField(SenderField);
-  InitTField(f);
+  Init_TField(Field_);
+  Init_TField(f);
 
-  if SenderTMDB.RootHeaderCount = 0 then
+  if DB_.RootHeaderCount = 0 then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
-      SenderField.Return := SenderTMDB.Return;
+      DB_.State := DB_PathNameError;
+      Field_.State := DB_.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_ReadRec(SenderTMDB.DefaultFieldPOS, SenderTMDB.RecFile, f.RHeader) = False then
+  if dbHeader_ReadRec(DB_.DefaultFieldPOS, DB_.IOHnd, f.RHeader) = False then
     begin
-      SenderTMDB.Return := f.RHeader.Return;
-      SenderField.Return := SenderTMDB.Return;
+      DB_.State := f.RHeader.State;
+      Field_.State := DB_.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if (dbHeader_MultipleMatch(name, f.RHeader.Name) = True) and (f.RHeader.ID = db_Header_FieldID) then
+  if (dbMultipleMatch(Name, f.RHeader.Name) = True) and (f.RHeader.ID = DB_Header_Field_ID) then
     begin
-      SenderTMDB.Return := db_Pack_ok;
-      SenderField := f;
+      DB_.State := DB_ok;
+      Field_ := f;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  if SenderTMDB.RootHeaderCount = 1 then
+  if DB_.RootHeaderCount = 1 then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
-      SenderField.Return := SenderTMDB.Return;
+      DB_.State := DB_PathNameError;
+      Field_.State := DB_.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_ReadRec(f.RHeader.NextHeader, SenderTMDB.RecFile, f.RHeader) = False then
+  if dbHeader_ReadRec(f.RHeader.NextHeader, DB_.IOHnd, f.RHeader) = False then
     begin
-      SenderTMDB.Return := f.RHeader.Return;
-      SenderField.Return := SenderTMDB.Return;
+      DB_.State := f.RHeader.State;
+      Field_.State := DB_.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if (dbHeader_MultipleMatch(name, f.RHeader.Name) = True) and (f.RHeader.ID = db_Header_FieldID) then
+  if (dbMultipleMatch(Name, f.RHeader.Name) = True) and (f.RHeader.ID = DB_Header_Field_ID) then
     begin
-      SenderTMDB.Return := db_Pack_ok;
-      SenderField := f;
+      DB_.State := DB_ok;
+      Field_ := f;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  while f.RHeader.CurrentHeader <> SenderTMDB.DefaultFieldPOS do
+  while f.RHeader.CurrentHeader <> DB_.DefaultFieldPOS do
     begin
-      if dbHeader_ReadRec(f.RHeader.NextHeader, SenderTMDB.RecFile, f.RHeader) = False then
+      if dbHeader_ReadRec(f.RHeader.NextHeader, DB_.IOHnd, f.RHeader) = False then
         begin
-          SenderTMDB.Return := f.RHeader.Return;
-          SenderField.Return := SenderTMDB.Return;
+          DB_.State := f.RHeader.State;
+          Field_.State := DB_.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      if (dbHeader_MultipleMatch(name, f.RHeader.Name) = True) and (f.RHeader.ID = db_Header_FieldID) then
+      if (dbMultipleMatch(Name, f.RHeader.Name) = True) and (f.RHeader.ID = DB_Header_Field_ID) then
         begin
-          SenderTMDB.Return := db_Pack_ok;
-          SenderField := f;
+          DB_.State := DB_ok;
+          Field_ := f;
           Result := True;
-          Exit;
+          exit;
         end;
     end;
-  SenderTMDB.Return := db_Pack_PathNameError;
-  SenderField.Return := SenderTMDB.Return;
+  DB_.State := DB_PathNameError;
+  Field_.State := DB_.State;
   Result := False;
 end;
 
-function dbPack_GetField(const PathName: umlString; var SenderField: TField; var SenderTMDB: TTMDB): Boolean;
+function db_GetField(const pathName: U_String; var Field_: TField; var DB_: TObjectDataHandle): Boolean;
 var
-  f                        : TField;
-  _FieldSearch             : TFieldSearch;
-  Rep_Int, _PathCount      : Integer;
-  TempPathStr, TempPathName: umlString;
+  f: TField;
+  fs: TFieldSearch;
+  i, PC: Integer;
+  TempPathStr, TempPathName: U_String;
 begin
-  if umlFileTest(SenderTMDB.RecFile) = False then
+  if umlFileTest(DB_.IOHnd) = False then
     begin
-      SenderTMDB.Return := db_Pack_ClosePackError;
+      DB_.State := DB_ClosePackError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_ReadRec(SenderTMDB.DefaultFieldPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_ReadRec(DB_.DefaultFieldPOS, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if umlGetLength(PathName) = 0 then
+  if umlGetLength(pathName) = 0 then
     begin
-      SenderField := f;
-      SenderTMDB.Return := db_Pack_ok;
+      Field_ := f;
+      DB_.State := DB_ok;
       Result := True;
-      Exit;
+      exit;
     end;
-  TempPathName := PathName;
-  _PathCount := dbPack_GetIndexStrCount(TempPathName);
+  TempPathName := pathName;
+  PC := db_GetPathCount(TempPathName);
 
-  if _PathCount > 0 then
+  if PC > 0 then
     begin
-      for Rep_Int := 1 to _PathCount do
+      for i := 1 to PC do
         begin
-          TempPathStr := dbPack_GetFirstPath(TempPathName);
-          TempPathName := dbPack_MaskFirstPath(TempPathName);
+          TempPathStr := db_GetFirstPath(TempPathName);
+          TempPathName := db_DeleteFirstPath(TempPathName);
 
-          if dbPack_TestNameStr(TempPathStr) = False then
+          if db_TestName(TempPathStr) = False then
             begin
-              SenderTMDB.Return := db_Pack_PathNameError;
+              DB_.State := DB_PathNameError;
               Result := False;
-              Exit;
+              exit;
             end;
-          if dbField_FindFirst(TempPathStr, db_Header_FieldID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, _FieldSearch) = False then
+          if dbField_FindFirst(TempPathStr, DB_Header_Field_ID, f.RHeader.CurrentHeader, DB_.IOHnd, fs) = False then
             begin
-              SenderTMDB.Return := _FieldSearch.Return;
+              DB_.State := fs.State;
               Result := False;
-              Exit;
+              exit;
             end;
-          if dbField_ReadRec(_FieldSearch.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+          if dbField_ReadRec(fs.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
             begin
-              SenderTMDB.Return := f.Return;
+              DB_.State := f.State;
               Result := False;
-              Exit;
+              exit;
             end;
         end;
     end;
-  SenderField := f;
-  SenderTMDB.Return := db_Pack_ok;
+  Field_ := f;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_GetPath(const fieldPos, RootFieldPos: Int64; var SenderTMDB: TTMDB; var RetPath: umlString): Boolean;
+function db_GetPath(const FieldPos, RootFieldPos: Int64; var DB_: TObjectDataHandle; var RetPath: U_String): Boolean;
 var
   f: TField;
 begin
-
-  if dbHeader_ReadRec(fieldPos, SenderTMDB.RecFile, f.RHeader) = False then
+  if dbHeader_ReadRec(FieldPos, DB_.IOHnd, f.RHeader) = False then
     begin
-      SenderTMDB.Return := f.RHeader.Return;
+      DB_.State := f.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if f.RHeader.ID <> db_Header_FieldID then
+  if f.RHeader.ID <> DB_Header_Field_ID then
     begin
-      SenderTMDB.Return := db_Field_SetPosError;
+      DB_.State := DB_Field_SetPosError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_OnlyReadFieldRec(f.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_OnlyReadFieldRec(f.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
   if f.RHeader.CurrentHeader = RootFieldPos then
     begin
-      RetPath := db_PathChar;
-      SenderTMDB.Return := db_Pack_ok;
+      RetPath := DB_Path_Delimiter;
+      DB_.State := DB_ok;
       Result := True;
-      Exit;
+      exit;
     end;
-  RetPath := f.RHeader.Name + db_PathChar;
+  RetPath := f.RHeader.Name + DB_Path_Delimiter;
 
-  while dbField_ReadRec(f.UpLevelFieldPOS, SenderTMDB.RecFile, f) = True do
+  while dbField_ReadRec(f.UpFieldPOS, DB_.IOHnd, f) do
     begin
       if f.RHeader.CurrentHeader = RootFieldPos then
         begin
-          RetPath := db_PathChar + RetPath;
-          SenderTMDB.Return := db_Pack_ok;
+          RetPath := DB_Path_Delimiter + RetPath;
+          DB_.State := DB_ok;
           Result := True;
-          Exit;
+          exit;
         end;
-      RetPath := f.RHeader.Name + db_PathChar + RetPath;
+      RetPath := f.RHeader.Name + DB_Path_Delimiter + RetPath;
     end;
-  SenderTMDB.Return := f.Return;
+  DB_.State := f.State;
   Result := False;
 end;
 
-function dbPack_NewItem(const PathName, ItemName, ItemDescription: umlString; const ItemExtID: Byte; var SenderItem: TItem; var SenderTMDB: TTMDB): Boolean;
+function db_NewItem(const pathName, ItemName, ItemDescription: U_String; const ItemExtID: Byte; var Item_: TItem; var DB_: TObjectDataHandle): Boolean;
 var
-  f                        : TField;
-  _FieldSearch             : TFieldSearch;
-  Rep_Int, _PathCount      : Integer;
-  TempPathStr, TempPathName: umlString;
+  f: TField;
+  fs: TFieldSearch;
+  i, PC: Integer;
+  TempPathStr, TempPathName: U_String;
 begin
-  if umlFileTest(SenderTMDB.RecFile) = False then
+  if umlFileTest(DB_.IOHnd) = False then
     begin
-      SenderTMDB.Return := db_Pack_ClosePackError;
+      DB_.State := DB_ClosePackError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_ReadRec(SenderTMDB.DefaultFieldPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_ReadRec(DB_.DefaultFieldPOS, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if umlGetLength(PathName) > 0 then
+  if umlGetLength(pathName) > 0 then
     begin
-      TempPathName := PathName;
-      _PathCount := dbPack_GetIndexStrCount(TempPathName);
-      if _PathCount > 0 then
+      TempPathName := pathName;
+      PC := db_GetPathCount(TempPathName);
+      if PC > 0 then
         begin
-          for Rep_Int := 1 to _PathCount do
+          for i := 1 to PC do
             begin
-              TempPathStr := dbPack_GetFirstPath(TempPathName);
-              TempPathName := dbPack_MaskFirstPath(TempPathName);
+              TempPathStr := db_GetFirstPath(TempPathName);
+              TempPathName := db_DeleteFirstPath(TempPathName);
 
-              if dbPack_TestNameStr(TempPathStr) = False then
+              if db_TestName(TempPathStr) = False then
                 begin
-                  SenderTMDB.Return := db_Pack_PathNameError;
+                  DB_.State := DB_PathNameError;
                   Result := False;
-                  Exit;
+                  exit;
                 end;
-              case dbField_FindFirst(TempPathStr, db_Header_FieldID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, _FieldSearch) of
+              case dbField_FindFirst(TempPathStr, DB_Header_Field_ID, f.RHeader.CurrentHeader, DB_.IOHnd, fs) of
                 False:
                   begin
-                    f.Description := db_Pack_DefaultDescription;
-                    if dbField_CreateField(TempPathStr, f.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+                    f.Description := DB_FileDescription;
+                    if dbField_CreateField(TempPathStr, f.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
                       begin
-                        SenderTMDB.Return := f.Return;
+                        DB_.State := f.State;
                         Result := False;
-                        Exit;
+                        exit;
                       end;
                   end;
                 True:
                   begin
-                    if dbField_ReadRec(_FieldSearch.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+                    if dbField_ReadRec(fs.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
                       begin
-                        SenderTMDB.Return := f.Return;
+                        DB_.State := f.State;
                         Result := False;
-                        Exit;
+                        exit;
                       end;
                   end;
               end;
@@ -5048,1210 +5896,1107 @@ begin
         end;
     end;
 
-  if dbPack_TestNameStr(ItemName) = False then
+  if db_TestName(ItemName) = False then
     begin
-      SenderTMDB.Return := db_Pack_ItemNameError;
+      DB_.State := DB_ItemNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirstItem(ItemName, ItemExtID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, _FieldSearch) = True then
+  if dbField_FindFirstItem(ItemName, ItemExtID, f.RHeader.CurrentHeader, DB_.IOHnd, fs) then
     begin
-      if SenderTMDB.OverWriteItem = False then
+      if DB_.OverWriteItem = False then
         begin
-          if SenderTMDB.SameItemName = False then
+          if DB_.AllowSameHeaderName = False then
             begin
-              SenderTMDB.Return := db_Pack_RepeatCreateItemError;
+              DB_.State := DB_RepeatCreateItemError;
               Result := False;
-              Exit;
+              exit;
             end;
         end
       else
         begin
-          if dbField_DeleteHeader(_FieldSearch.RHeader.CurrentHeader, f.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+          if dbField_DeleteHeader(fs.RHeader.CurrentHeader, f.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
             begin
-              SenderTMDB.Return := f.Return;
+              DB_.State := f.State;
               Result := False;
-              Exit;
+              exit;
             end;
         end;
     end;
-  SenderItem.Description := ItemDescription;
-  if dbField_CreateItem(ItemName, ItemExtID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderItem) = False then
+  Item_.Description := ItemDescription;
+  if dbField_CreateItem(ItemName, ItemExtID, f.RHeader.CurrentHeader, DB_.IOHnd, Item_) = False then
     begin
-      SenderTMDB.Return := SenderItem.Return;
+      DB_.State := Item_.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDB.WriteFlags := True;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_DeleteItem(const PathName, FilterName: umlString; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean;
+function db_DeleteItem(const pathName, FilterName: U_String; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
 var
   TempSR: TFieldSearch;
-  f     : TField;
+  f: TField;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirstItem(FilterName, ItemExtID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = False then
+  if dbField_FindFirstItem(FilterName, ItemExtID, f.RHeader.CurrentHeader, DB_.IOHnd, TempSR) = False then
     begin
-      SenderTMDB.Return := TempSR.Return;
+      DB_.State := TempSR.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+  if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  while dbField_FindFirstItem(FilterName, ItemExtID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, TempSR) = True do
+  while dbField_FindFirstItem(FilterName, ItemExtID, f.RHeader.CurrentHeader, DB_.IOHnd, TempSR) do
     begin
-      if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, SenderTMDB.RecFile, f) = False then
+      if dbField_DeleteHeader(TempSR.RHeader.CurrentHeader, f.RHeader.CurrentHeader, DB_.IOHnd, f) = False then
         begin
-          SenderTMDB.Return := f.Return;
+          DB_.State := f.State;
           Result := False;
-          Exit;
+          exit;
         end;
     end;
-  SenderTMDB.WriteFlags := True;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_GetItem(const PathName, ItemName: umlString; const ItemExtID: Byte; var SenderItem: TItem; var SenderTMDB: TTMDB): Boolean;
+function db_GetItem(const pathName, ItemName: U_String; const ItemExtID: Byte; var Item_: TItem; var DB_: TObjectDataHandle): Boolean;
 var
-  f       : TField;
+  f: TField;
   _FieldSR: TFieldSearch;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirstItem(ItemName, ItemExtID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, _FieldSR) = False then
+  if dbField_FindFirstItem(ItemName, ItemExtID, f.RHeader.CurrentHeader, DB_.IOHnd, _FieldSR) = False then
     begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
+      DB_.State := DB_OpenItemError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_ReadRec(_FieldSR.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderItem) = False then
+  if dbItem_ReadRec(_FieldSR.RHeader.CurrentHeader, DB_.IOHnd, Item_) = False then
     begin
-      SenderTMDB.Return := SenderItem.Return;
+      DB_.State := Item_.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDB.WriteFlags := True;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_ItemCreate(const PathName, ItemName, ItemDescription: umlString; const ItemExtID: Byte; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
+function db_ItemCreate(const pathName, ItemName, ItemDescription: U_String; const ItemExtID: Byte; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
 begin
-  if SenderTMDBItemHandle.OpenFlags = True then
+  if ItemHnd_.OpenFlags then
     begin
-      SenderTMDB.Return := db_Pack_RepeatCreateItemError;
+      DB_.State := DB_RepeatCreateItemError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbPack_NewItem(PathName, ItemName, ItemDescription, ItemExtID, SenderTMDBItemHandle.Item, SenderTMDB) = False then
+  if db_NewItem(pathName, ItemName, ItemDescription, ItemExtID, ItemHnd_.Item, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_BlockInit(SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
+  if dbItem_BlockInit(DB_.IOHnd, ItemHnd_.Item) = False then
     begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
+      DB_.State := ItemHnd_.Item.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDBItemHandle.Path := PathName;
-  SenderTMDBItemHandle.Name := ItemName;
-  SenderTMDBItemHandle.Description := ItemDescription;
-  SenderTMDBItemHandle.CreateTime := SenderTMDBItemHandle.Item.RHeader.CreateTime;
-  SenderTMDBItemHandle.LastModifyTime := SenderTMDBItemHandle.Item.RHeader.LastModifyTime;
-  SenderTMDBItemHandle.ItemExtID := ItemExtID;
-  SenderTMDBItemHandle.OpenFlags := True;
-  SenderTMDB.Return := db_Pack_ok;
+  ItemHnd_.Name := ItemName;
+  ItemHnd_.Description := ItemDescription;
+  ItemHnd_.CreateTime := ItemHnd_.Item.RHeader.CreateTime;
+  ItemHnd_.ModificationTime := ItemHnd_.Item.RHeader.ModificationTime;
+  ItemHnd_.ItemExtID := ItemExtID;
+  ItemHnd_.OpenFlags := True;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_ItemFastCreate(const ItemName, ItemDescription: umlString; const fPos: Int64; const ItemExtID: Byte; var SenderTMDBItemHandle: TTMDBItemHandle;
-  var SenderTMDB: TTMDB): Boolean;
+function db_ItemFastCreate(const ItemName, ItemDescription: U_String; const fPos: Int64; const ItemExtID: Byte; var ItemHnd_: TItemHandle_;
+  var DB_: TObjectDataHandle): Boolean;
 begin
-  if SenderTMDBItemHandle.OpenFlags = True then
+  if ItemHnd_.OpenFlags then
     begin
-      SenderTMDB.Return := db_Pack_RepeatCreateItemError;
+      DB_.State := DB_RepeatCreateItemError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_CreateItem(ItemName, ItemExtID, fPos, SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
+  if dbField_CreateItem(ItemName, ItemExtID, fPos, DB_.IOHnd, ItemHnd_.Item) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_BlockInit(SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
+  if dbItem_BlockInit(DB_.IOHnd, ItemHnd_.Item) = False then
     begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
+      DB_.State := ItemHnd_.Item.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDBItemHandle.Path := '';
-  SenderTMDBItemHandle.Name := ItemName;
-  SenderTMDBItemHandle.Description := ItemDescription;
-  SenderTMDBItemHandle.CreateTime := SenderTMDBItemHandle.Item.RHeader.CreateTime;
-  SenderTMDBItemHandle.LastModifyTime := SenderTMDBItemHandle.Item.RHeader.LastModifyTime;
-  SenderTMDBItemHandle.ItemExtID := ItemExtID;
-  SenderTMDBItemHandle.OpenFlags := True;
-  SenderTMDB.Return := db_Pack_ok;
+  ItemHnd_.Name := ItemName;
+  ItemHnd_.Description := ItemDescription;
+  ItemHnd_.CreateTime := ItemHnd_.Item.RHeader.CreateTime;
+  ItemHnd_.ModificationTime := ItemHnd_.Item.RHeader.ModificationTime;
+  ItemHnd_.ItemExtID := ItemExtID;
+  ItemHnd_.OpenFlags := True;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_ItemFastInsertNew(const ItemName, ItemDescription: umlString; const fieldPos, InsertHeaderPos: Int64; const ItemExtID: Byte; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
+function db_ItemFastInsertNew(const ItemName, ItemDescription: U_String; const FieldPos, InsertHeaderPos: Int64; const ItemExtID: Byte; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
 begin
-  if SenderTMDBItemHandle.OpenFlags = True then
+  if ItemHnd_.OpenFlags then
     begin
-      SenderTMDB.Return := db_Pack_RepeatCreateItemError;
+      DB_.State := DB_RepeatCreateItemError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_InsertNewItem(ItemName, ItemExtID, fieldPos, InsertHeaderPos, SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
+  if dbField_InsertNewItem(ItemName, ItemExtID, FieldPos, InsertHeaderPos, DB_.IOHnd, ItemHnd_.Item) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_BlockInit(SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
+  if dbItem_BlockInit(DB_.IOHnd, ItemHnd_.Item) = False then
     begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
+      DB_.State := ItemHnd_.Item.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDBItemHandle.Path := '';
-  SenderTMDBItemHandle.Name := ItemName;
-  SenderTMDBItemHandle.Description := ItemDescription;
-  SenderTMDBItemHandle.CreateTime := SenderTMDBItemHandle.Item.RHeader.CreateTime;
-  SenderTMDBItemHandle.LastModifyTime := SenderTMDBItemHandle.Item.RHeader.LastModifyTime;
-  SenderTMDBItemHandle.ItemExtID := ItemExtID;
-  SenderTMDBItemHandle.OpenFlags := True;
-  SenderTMDB.Return := db_Pack_ok;
+  ItemHnd_.Name := ItemName;
+  ItemHnd_.Description := ItemDescription;
+  ItemHnd_.CreateTime := ItemHnd_.Item.RHeader.CreateTime;
+  ItemHnd_.ModificationTime := ItemHnd_.Item.RHeader.ModificationTime;
+  ItemHnd_.ItemExtID := ItemExtID;
+  ItemHnd_.OpenFlags := True;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_ItemOpen(const PathName, ItemName: umlString; const ItemExtID: Byte; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
+function db_ItemOpen(const pathName, ItemName: U_String; const ItemExtID: Byte; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
 begin
-  if SenderTMDBItemHandle.OpenFlags = True then
+  if ItemHnd_.OpenFlags then
     begin
-      SenderTMDB.Return := db_Pack_RepeatOpenItemError;
+      DB_.State := DB_RepeatOpenItemError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbPack_GetItem(PathName, ItemName, ItemExtID, SenderTMDBItemHandle.Item, SenderTMDB) = False then
+  if db_GetItem(pathName, ItemName, ItemExtID, ItemHnd_.Item, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_BlockInit(SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
+  if dbItem_BlockInit(DB_.IOHnd, ItemHnd_.Item) = False then
     begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
+      DB_.State := ItemHnd_.Item.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDBItemHandle.Path := PathName;
-  SenderTMDBItemHandle.Name := ItemName;
-  SenderTMDBItemHandle.Description := SenderTMDBItemHandle.Item.Description;
-  SenderTMDBItemHandle.CreateTime := SenderTMDBItemHandle.Item.RHeader.CreateTime;
-  SenderTMDBItemHandle.LastModifyTime := SenderTMDBItemHandle.Item.RHeader.LastModifyTime;
-  SenderTMDBItemHandle.ItemExtID := ItemExtID;
-  SenderTMDBItemHandle.OpenFlags := True;
-  SenderTMDB.Return := db_Pack_ok;
+  ItemHnd_.Name := ItemName;
+  ItemHnd_.Description := ItemHnd_.Item.Description;
+  ItemHnd_.CreateTime := ItemHnd_.Item.RHeader.CreateTime;
+  ItemHnd_.ModificationTime := ItemHnd_.Item.RHeader.ModificationTime;
+  ItemHnd_.ItemExtID := ItemExtID;
+  ItemHnd_.OpenFlags := True;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_ItemFastOpen(const fPos: Int64; const ItemExtID: Byte; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-var
-  _Item: TItem;
+function db_ItemFastOpen(const fPos: Int64; const ItemExtID: Byte; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
 begin
-  if SenderTMDBItemHandle.OpenFlags = True then
+  if ItemHnd_.OpenFlags then
     begin
-      SenderTMDB.Return := db_Pack_RepeatOpenItemError;
+      DB_.State := DB_RepeatOpenItemError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_ReadRec(fPos, SenderTMDB.RecFile, _Item.RHeader) = False then
+  if dbHeader_ReadRec(fPos, DB_.IOHnd, ItemHnd_.Item.RHeader) = False then
     begin
-      SenderTMDB.Return := _Item.RHeader.Return;
+      DB_.State := ItemHnd_.Item.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if _Item.RHeader.ID <> db_Header_ItemID then
+  if ItemHnd_.Item.RHeader.ID <> DB_Header_Item_ID then
     begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
+      DB_.State := DB_OpenItemError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbItem_OnlyReadItemRec(_Item.RHeader.DataMainPOS, SenderTMDB.RecFile, _Item) = False then
+  if dbItem_OnlyReadItemRec(ItemHnd_.Item.RHeader.DataPosition, DB_.IOHnd, ItemHnd_.Item) = False then
     begin
-      SenderTMDB.Return := _Item.Return;
+      DB_.State := ItemHnd_.Item.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if _Item.ExtID <> ItemExtID then
+  if ItemHnd_.Item.ExtID <> ItemExtID then
     begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
+      DB_.State := DB_OpenItemError;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDBItemHandle.Item := _Item;
-  if dbItem_BlockInit(SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
+  if dbItem_BlockInit(DB_.IOHnd, ItemHnd_.Item) = False then
     begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
+      DB_.State := ItemHnd_.Item.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDBItemHandle.Path := '';
-  SenderTMDBItemHandle.Name := _Item.RHeader.Name;
-  SenderTMDBItemHandle.Description := SenderTMDBItemHandle.Item.Description;
-  SenderTMDBItemHandle.CreateTime := SenderTMDBItemHandle.Item.RHeader.CreateTime;
-  SenderTMDBItemHandle.LastModifyTime := SenderTMDBItemHandle.Item.RHeader.LastModifyTime;
-  SenderTMDBItemHandle.ItemExtID := ItemExtID;
-  SenderTMDBItemHandle.OpenFlags := True;
-  SenderTMDB.Return := db_Pack_ok;
+  ItemHnd_.Name := ItemHnd_.Item.RHeader.Name;
+  ItemHnd_.Description := ItemHnd_.Item.Description;
+  ItemHnd_.CreateTime := ItemHnd_.Item.RHeader.CreateTime;
+  ItemHnd_.ModificationTime := ItemHnd_.Item.RHeader.ModificationTime;
+  ItemHnd_.ItemExtID := ItemExtID;
+  ItemHnd_.OpenFlags := True;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_ItemUpdate(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
+function db_ItemUpdate(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
 begin
-  if SenderTMDBItemHandle.OpenFlags = False then
+  if ItemHnd_.OpenFlags = False then
     begin
-      SenderTMDB.Return := db_Pack_CloseItemError;
+      DB_.State := DB_CloseItemError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if SenderTMDBItemHandle.Item.DataModify then
+  if ItemHnd_.Item.DataModification then
     begin
-      SenderTMDBItemHandle.Item.RHeader.Name := SenderTMDBItemHandle.Name;
-      SenderTMDBItemHandle.Item.RHeader.CreateTime := SenderTMDBItemHandle.CreateTime;
-      SenderTMDBItemHandle.Item.RHeader.LastModifyTime := SenderTMDBItemHandle.LastModifyTime;
-      SenderTMDBItemHandle.Item.Description := SenderTMDBItemHandle.Description;
-      SenderTMDBItemHandle.Item.ExtID := SenderTMDBItemHandle.ItemExtID;
-      if dbItem_WriteRec(SenderTMDBItemHandle.Item.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
+      // fixed by qq600585,2018-12
+      // Header has a certain chance of being changed by other item operation during the opening of item
+      if dbHeader_ReadReservedRec(ItemHnd_.Item.RHeader.CurrentHeader, DB_.IOHnd, ItemHnd_.Item.RHeader) = False then
         begin
-          SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
+          DB_.State := ItemHnd_.Item.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      SenderTMDBItemHandle.Item.DataModify := False;
-    end;
-  Result := True;
-end;
-
-function dbPack_ItemBodyReset(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_CloseItemError;
-      Result := False;
-      Exit;
-    end;
-
-  SenderTMDBItemHandle.Item.RHeader.Name := SenderTMDBItemHandle.Name;
-  SenderTMDBItemHandle.Item.RHeader.CreateTime := SenderTMDBItemHandle.CreateTime;
-  SenderTMDBItemHandle.Item.RHeader.LastModifyTime := SenderTMDBItemHandle.LastModifyTime;
-  SenderTMDBItemHandle.Item.Description := SenderTMDBItemHandle.Description;
-  SenderTMDBItemHandle.Item.ExtID := SenderTMDBItemHandle.ItemExtID;
-
-  SenderTMDBItemHandle.Item.FirstBlockPOS := 0;
-  SenderTMDBItemHandle.Item.LastBlockPOS := 0;
-  SenderTMDBItemHandle.Item.Size := 0;
-  SenderTMDBItemHandle.Item.BlockCount := 0;
-
-  if dbItem_WriteRec(SenderTMDBItemHandle.Item.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDBItemHandle.Item.DataModify := False;
-
-  Result := True;
-end;
-
-function dbPack_ItemClose(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-begin
-  Result := dbPack_ItemUpdate(SenderTMDBItemHandle, SenderTMDB);
-  if Result then
-      SenderTMDBItemHandle.OpenFlags := False;
-end;
-
-function dbPack_ItemReName(const fieldPos: Int64; const NewItemName, NewItemDescription: umlString; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-var
-  SenderSearchHnd: TTMDBSearchItem;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_CloseItemError;
-      Result := False;
-      Exit;
-    end;
-  if dbPack_FastFindFirstItem(fieldPos, NewItemName, SenderTMDBItemHandle.ItemExtID, SenderSearchHnd, SenderTMDB) then
-    if (SenderTMDBItemHandle.Name = NewItemName) then
-      begin
-        SenderTMDB.Return := db_Pack_ItemNameError;
-        Result := False;
-        Exit;
-      end;
-  SenderTMDBItemHandle.Name := NewItemName;
-  SenderTMDBItemHandle.Description := NewItemDescription;
-  SenderTMDBItemHandle.Item.RHeader.Name := SenderTMDBItemHandle.Name;
-  SenderTMDBItemHandle.Item.Description := SenderTMDBItemHandle.Description;
-  if dbItem_WriteRec(SenderTMDBItemHandle.Item.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_ItemRead(const Size: Int64; var Buffers; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
-      Result := False;
-      Exit;
-    end;
-  if dbItem_BlockReadData(SenderTMDB.RecFile, SenderTMDBItemHandle.Item, Buffers, Size) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_ItemWrite(const Size: Int64; var Buffers; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
-      Result := False;
-      Exit;
-    end;
-  if dbItem_BlockWriteData(SenderTMDB.RecFile, SenderTMDBItemHandle.Item, Buffers, Size) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_ItemReadStr(var Name: umlString; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-var
-  StrSize : Integer;
-  SwapName: umlBytes;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
-      Result := False;
-      Exit;
-    end;
-  if dbItem_BlockReadData(SenderTMDB.RecFile, SenderTMDBItemHandle.Item, StrSize, FixedLengthStringHeaderSize) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  umlSetLength(SwapName, StrSize);
-  if StrSize <= 0 then
-    begin
-      name := '';
-      SenderTMDB.Return := db_Pack_ok;
-      Result := True;
-      Exit;
-    end;
-  if dbItem_BlockReadData(SenderTMDB.RecFile, SenderTMDBItemHandle.Item, SwapName[0], StrSize) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  name := umlStringOf(SwapName).Text;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_ItemWriteStr(const Name: umlString; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-var
-  StrSize : Integer;
-  SwapName: umlBytes;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
-      Result := False;
-      Exit;
-    end;
-  SwapName := umlBytesOf(name);
-  StrSize := umlGetLength(SwapName);
-  if dbItem_BlockWriteData(SenderTMDB.RecFile, SenderTMDBItemHandle.Item, StrSize, FixedLengthStringHeaderSize) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  if StrSize <= 0 then
-    begin
-      SenderTMDB.Return := db_Pack_ok;
-      Result := True;
-      Exit;
-    end;
-  if dbItem_BlockWriteData(SenderTMDB.RecFile, SenderTMDBItemHandle.Item, SwapName[0], StrSize) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_ItemSeekPos(const fPos: Int64; var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
-      Result := False;
-      Exit;
-    end;
-  if dbItem_BlockSeekPOS(SenderTMDB.RecFile, SenderTMDBItemHandle.Item, fPos) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_ItemSeekStartPos(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
-      Result := False;
-      Exit;
-    end;
-  if dbItem_BlockSeekStartPOS(SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_ItemSeekLastPos(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Boolean;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
-      Result := False;
-      Exit;
-    end;
-  if dbItem_BlockSeekLastPOS(SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  SenderTMDB.Return := db_Pack_ok;
-  Result := True;
-end;
-
-function dbPack_ItemGetPos(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Int64;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
-      Result := 0;
-      Exit;
-    end;
-  Result := dbItem_BlockGetPOS(SenderTMDB.RecFile, SenderTMDBItemHandle.Item);
-end;
-
-function dbPack_ItemGetSize(var SenderTMDBItemHandle: TTMDBItemHandle; var SenderTMDB: TTMDB): Int64;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
-      Result := 0;
-      Exit;
-    end;
-  Result := SenderTMDBItemHandle.Item.Size;
-end;
-
-function dbPack_AppendItemSize(var SenderTMDBItemHandle: TTMDBItemHandle; const Size: Int64; var SenderTMDB: TTMDB): Boolean;
-var
-  SwapBuffers: array [0 .. umlMaxFileRecSize] of Byte;
-  Rep_Int    : Integer;
-begin
-  if SenderTMDBItemHandle.OpenFlags = False then
-    begin
-      SenderTMDB.Return := db_Pack_OpenItemError;
-      Result := False;
-      Exit;
-    end;
-  if dbItem_BlockSeekLastPOS(SenderTMDB.RecFile, SenderTMDBItemHandle.Item) = False then
-    begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
-      Result := False;
-      Exit;
-    end;
-  if Size > umlMaxFileRecSize then
-    begin
-      for Rep_Int := 1 to (Size div umlMaxFileRecSize) do
+      ItemHnd_.Item.RHeader.Name := ItemHnd_.Name;
+      ItemHnd_.Item.RHeader.CreateTime := ItemHnd_.CreateTime;
+      ItemHnd_.Item.RHeader.ModificationTime := ItemHnd_.ModificationTime;
+      ItemHnd_.Item.Description := ItemHnd_.Description;
+      ItemHnd_.Item.ExtID := ItemHnd_.ItemExtID;
+      if dbItem_WriteRec(ItemHnd_.Item.RHeader.CurrentHeader, DB_.IOHnd, ItemHnd_.Item) = False then
         begin
-          if dbItem_BlockWriteData(SenderTMDB.RecFile, SenderTMDBItemHandle.Item, SwapBuffers, umlMaxFileRecSize) = False then
+          DB_.State := ItemHnd_.Item.State;
+          Result := False;
+          exit;
+        end;
+      ItemHnd_.Item.DataModification := False;
+    end;
+  Result := True;
+end;
+
+function db_ItemBodyReset(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+begin
+  if ItemHnd_.OpenFlags = False then
+    begin
+      DB_.State := DB_CloseItemError;
+      Result := False;
+      exit;
+    end;
+
+  // fixed by qq600585,2018-12
+  // Header has a certain chance of being changed by other item operation during the opening of item
+  if dbHeader_ReadReservedRec(ItemHnd_.Item.RHeader.CurrentHeader, DB_.IOHnd, ItemHnd_.Item.RHeader) = False then
+    begin
+      DB_.State := ItemHnd_.Item.State;
+      Result := False;
+      exit;
+    end;
+
+  ItemHnd_.Item.RHeader.Name := ItemHnd_.Name;
+  ItemHnd_.Item.RHeader.CreateTime := ItemHnd_.CreateTime;
+  ItemHnd_.Item.RHeader.ModificationTime := ItemHnd_.ModificationTime;
+  ItemHnd_.Item.Description := ItemHnd_.Description;
+  ItemHnd_.Item.ExtID := ItemHnd_.ItemExtID;
+
+  ItemHnd_.Item.FirstBlockPOS := 0;
+  ItemHnd_.Item.LastBlockPOS := 0;
+  ItemHnd_.Item.Size := 0;
+  ItemHnd_.Item.BlockCount := 0;
+
+  if dbItem_WriteRec(ItemHnd_.Item.RHeader.CurrentHeader, DB_.IOHnd, ItemHnd_.Item) = False then
+    begin
+      DB_.State := ItemHnd_.Item.State;
+      Result := False;
+      exit;
+    end;
+  ItemHnd_.Item.DataModification := False;
+
+  Result := True;
+end;
+
+function db_ItemClose(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+begin
+  Result := db_ItemUpdate(ItemHnd_, DB_);
+  if Result then
+      ItemHnd_.OpenFlags := False;
+end;
+
+function db_ItemReName(const FieldPos: Int64; const NewItemName, NewItemDescription: U_String; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+var
+  SenderSearchHnd: TSearchItem_;
+begin
+  if ItemHnd_.OpenFlags = False then
+    begin
+      DB_.State := DB_CloseItemError;
+      Result := False;
+      exit;
+    end;
+  if db_FastFindFirstItem(FieldPos, NewItemName, ItemHnd_.ItemExtID, SenderSearchHnd, DB_) then
+    if (ItemHnd_.Name = NewItemName) then
+      begin
+        DB_.State := DB_ItemNameError;
+        Result := False;
+        exit;
+      end;
+
+  // fixed by qq600585,2018-12
+  // Header has a certain chance of being changed by other item operation during the opening of item
+  if dbHeader_ReadReservedRec(ItemHnd_.Item.RHeader.CurrentHeader, DB_.IOHnd, ItemHnd_.Item.RHeader) = False then
+    begin
+      DB_.State := ItemHnd_.Item.State;
+      Result := False;
+      exit;
+    end;
+
+  ItemHnd_.Name := NewItemName;
+  ItemHnd_.Description := NewItemDescription;
+  ItemHnd_.Item.RHeader.Name := ItemHnd_.Name;
+  ItemHnd_.Item.Description := ItemHnd_.Description;
+  if dbItem_WriteRec(ItemHnd_.Item.RHeader.CurrentHeader, DB_.IOHnd, ItemHnd_.Item) = False then
+    begin
+      DB_.State := ItemHnd_.Item.State;
+      Result := False;
+      exit;
+    end;
+  DB_.State := DB_ok;
+  Result := True;
+end;
+
+function db_ItemRead(const Size: Int64; var Buffers; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+begin
+  if ItemHnd_.OpenFlags = False then
+    begin
+      DB_.State := DB_OpenItemError;
+      Result := False;
+      exit;
+    end;
+  if dbItem_BlockReadData(DB_.IOHnd, ItemHnd_.Item, Buffers, Size) = False then
+    begin
+      DB_.State := ItemHnd_.Item.State;
+      Result := False;
+      exit;
+    end;
+  DB_.State := DB_ok;
+  Result := True;
+end;
+
+function db_ItemWrite(const Size: Int64; var Buffers; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+begin
+  if ItemHnd_.OpenFlags = False then
+    begin
+      DB_.State := DB_OpenItemError;
+      Result := False;
+      exit;
+    end;
+  if dbItem_BlockWriteData(DB_.IOHnd, ItemHnd_.Item, Buffers, Size) = False then
+    begin
+      DB_.State := ItemHnd_.Item.State;
+      Result := False;
+      exit;
+    end;
+  DB_.State := DB_ok;
+  Result := True;
+end;
+
+function db_ItemSeekPos(const fPos: Int64; var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+begin
+  if ItemHnd_.OpenFlags = False then
+    begin
+      DB_.State := DB_OpenItemError;
+      Result := False;
+      exit;
+    end;
+  if dbItem_BlockSeekPOS(DB_.IOHnd, ItemHnd_.Item, fPos) = False then
+    begin
+      DB_.State := ItemHnd_.Item.State;
+      Result := False;
+      exit;
+    end;
+  DB_.State := DB_ok;
+  Result := True;
+end;
+
+function db_ItemSeekStartPos(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+begin
+  if ItemHnd_.OpenFlags = False then
+    begin
+      DB_.State := DB_OpenItemError;
+      Result := False;
+      exit;
+    end;
+  if dbItem_BlockSeekStartPOS(DB_.IOHnd, ItemHnd_.Item) = False then
+    begin
+      DB_.State := ItemHnd_.Item.State;
+      Result := False;
+      exit;
+    end;
+  DB_.State := DB_ok;
+  Result := True;
+end;
+
+function db_ItemSeekLastPos(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Boolean;
+begin
+  if ItemHnd_.OpenFlags = False then
+    begin
+      DB_.State := DB_OpenItemError;
+      Result := False;
+      exit;
+    end;
+  if dbItem_BlockSeekLastPOS(DB_.IOHnd, ItemHnd_.Item) = False then
+    begin
+      DB_.State := ItemHnd_.Item.State;
+      Result := False;
+      exit;
+    end;
+  DB_.State := DB_ok;
+  Result := True;
+end;
+
+function db_ItemGetPos(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Int64;
+begin
+  if ItemHnd_.OpenFlags = False then
+    begin
+      DB_.State := DB_OpenItemError;
+      Result := 0;
+      exit;
+    end;
+  Result := dbItem_BlockGetPOS(DB_.IOHnd, ItemHnd_.Item);
+end;
+
+function db_ItemGetSize(var ItemHnd_: TItemHandle_; var DB_: TObjectDataHandle): Int64;
+begin
+  if ItemHnd_.OpenFlags = False then
+    begin
+      DB_.State := DB_OpenItemError;
+      Result := 0;
+      exit;
+    end;
+  Result := ItemHnd_.Item.Size;
+end;
+
+function db_AppendItemSize(var ItemHnd_: TItemHandle_; const Size: Int64; var DB_: TObjectDataHandle): Boolean;
+var
+  SwapBuffers: array [0 .. C_MaxBufferFragmentSize] of Byte;
+  i: Integer;
+begin
+  if ItemHnd_.OpenFlags = False then
+    begin
+      DB_.State := DB_OpenItemError;
+      Result := False;
+      exit;
+    end;
+  if dbItem_BlockSeekLastPOS(DB_.IOHnd, ItemHnd_.Item) = False then
+    begin
+      DB_.State := ItemHnd_.Item.State;
+      Result := False;
+      exit;
+    end;
+  if Size > C_MaxBufferFragmentSize then
+    begin
+      for i := 1 to (Size div C_MaxBufferFragmentSize) do
+        begin
+          if dbItem_BlockWriteData(DB_.IOHnd, ItemHnd_.Item, SwapBuffers, C_MaxBufferFragmentSize) = False then
             begin
-              SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
+              DB_.State := ItemHnd_.Item.State;
               Result := False;
-              Exit;
+              exit;
             end;
         end;
-      if dbItem_BlockWriteData(SenderTMDB.RecFile, SenderTMDBItemHandle.Item, SwapBuffers, (Size mod umlMaxFileRecSize)) = False then
+      if dbItem_BlockWriteData(DB_.IOHnd, ItemHnd_.Item, SwapBuffers, (Size mod C_MaxBufferFragmentSize)) = False then
         begin
-          SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
+          DB_.State := ItemHnd_.Item.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      SenderTMDB.Return := db_Pack_ok;
+      DB_.State := DB_ok;
       Result := True;
-      Exit;
+      exit;
     end;
-  if dbItem_BlockWriteData(SenderTMDB.RecFile, SenderTMDBItemHandle.Item, SwapBuffers, Size) = False then
+  if dbItem_BlockWriteData(DB_.IOHnd, ItemHnd_.Item, SwapBuffers, Size) = False then
     begin
-      SenderTMDB.Return := SenderTMDBItemHandle.Item.Return;
+      DB_.State := ItemHnd_.Item.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_ExistsRootField(const Name: umlString; var SenderTMDB: TTMDB): Boolean;
+function db_ExistsRootField(const Name: U_String; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if SenderTMDB.RootHeaderCount = 0 then
+  if DB_.RootHeaderCount = 0 then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_ReadRec(SenderTMDB.DefaultFieldPOS, SenderTMDB.RecFile, f.RHeader) = False then
+  if dbHeader_ReadRec(DB_.DefaultFieldPOS, DB_.IOHnd, f.RHeader) = False then
     begin
-      SenderTMDB.Return := f.RHeader.Return;
+      DB_.State := f.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if (dbHeader_MultipleMatch(name, f.RHeader.Name) = True) and (f.RHeader.ID = db_Header_FieldID) then
+  if (dbMultipleMatch(Name, f.RHeader.Name) = True) and (f.RHeader.ID = DB_Header_Field_ID) then
     begin
-      SenderTMDB.Return := db_Pack_ok;
+      DB_.State := DB_ok;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  if SenderTMDB.RootHeaderCount = 1 then
+  if DB_.RootHeaderCount = 1 then
     begin
-      SenderTMDB.Return := db_Pack_PathNameError;
+      DB_.State := DB_PathNameError;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbHeader_ReadRec(f.RHeader.NextHeader, SenderTMDB.RecFile, f.RHeader) = False then
+  if dbHeader_ReadRec(f.RHeader.NextHeader, DB_.IOHnd, f.RHeader) = False then
     begin
-      SenderTMDB.Return := f.RHeader.Return;
+      DB_.State := f.RHeader.State;
       Result := False;
-      Exit;
+      exit;
     end;
 
-  if (dbHeader_MultipleMatch(name, f.RHeader.Name) = True) and (f.RHeader.ID = db_Header_FieldID) then
+  if (dbMultipleMatch(Name, f.RHeader.Name) = True) and (f.RHeader.ID = DB_Header_Field_ID) then
     begin
-      SenderTMDB.Return := db_Pack_ok;
+      DB_.State := DB_ok;
       Result := True;
-      Exit;
+      exit;
     end;
 
-  while f.RHeader.CurrentHeader <> SenderTMDB.DefaultFieldPOS do
+  while f.RHeader.CurrentHeader <> DB_.DefaultFieldPOS do
     begin
-      if dbHeader_ReadRec(f.RHeader.NextHeader, SenderTMDB.RecFile, f.RHeader) = False then
+      if dbHeader_ReadRec(f.RHeader.NextHeader, DB_.IOHnd, f.RHeader) = False then
         begin
-          SenderTMDB.Return := f.RHeader.Return;
+          DB_.State := f.RHeader.State;
           Result := False;
-          Exit;
+          exit;
         end;
-      if (dbHeader_MultipleMatch(name, f.RHeader.Name) = True) and (f.RHeader.ID = db_Header_FieldID) then
+      if (dbMultipleMatch(Name, f.RHeader.Name) = True) and (f.RHeader.ID = DB_Header_Field_ID) then
         begin
-          SenderTMDB.Return := db_Pack_ok;
+          DB_.State := DB_ok;
           Result := True;
-          Exit;
+          exit;
         end;
     end;
-  SenderTMDB.Return := db_Pack_PathNameError;
+  DB_.State := DB_PathNameError;
   Result := False;
 end;
 
-function dbPack_FindFirstHeader(const PathName, FilterName: umlString; const ID: Byte; var SenderSearch: TTMDBSearchHeader; var SenderTMDB: TTMDB): Boolean;
+function db_FindFirstHeader(const pathName, FilterName: U_String; const ID: Byte; var SenderSearch: TSearchHeader_; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirst(FilterName, ID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindFirst(FilterName, ID, f.RHeader.CurrentHeader, DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.ID := SenderSearch.FieldSearch.RHeader.ID;
   SenderSearch.CreateTime := SenderSearch.FieldSearch.RHeader.CreateTime;
-  SenderSearch.LastModifyTime := SenderSearch.FieldSearch.RHeader.LastModifyTime;
+  SenderSearch.ModificationTime := SenderSearch.FieldSearch.RHeader.ModificationTime;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindNextHeader(var SenderSearch: TTMDBSearchHeader; var SenderTMDB: TTMDB): Boolean;
+function db_FindNextHeader(var SenderSearch: TSearchHeader_; var DB_: TObjectDataHandle): Boolean;
 begin
-  if dbField_FindNext(SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindNext(DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.ID := SenderSearch.FieldSearch.RHeader.ID;
   SenderSearch.CreateTime := SenderSearch.FieldSearch.RHeader.CreateTime;
-  SenderSearch.LastModifyTime := SenderSearch.FieldSearch.RHeader.LastModifyTime;
+  SenderSearch.ModificationTime := SenderSearch.FieldSearch.RHeader.ModificationTime;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := SenderSearch.CompleteCount + 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindLastHeader(const PathName, FilterName: umlString; const ID: Byte; var SenderSearch: TTMDBSearchHeader; var SenderTMDB: TTMDB): Boolean;
+function db_FindLastHeader(const pathName, FilterName: U_String; const ID: Byte; var SenderSearch: TSearchHeader_; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindLast(FilterName, ID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindLast(FilterName, ID, f.RHeader.CurrentHeader, DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.ID := SenderSearch.FieldSearch.RHeader.ID;
   SenderSearch.CreateTime := SenderSearch.FieldSearch.RHeader.CreateTime;
-  SenderSearch.LastModifyTime := SenderSearch.FieldSearch.RHeader.LastModifyTime;
+  SenderSearch.ModificationTime := SenderSearch.FieldSearch.RHeader.ModificationTime;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindPrevHeader(var SenderSearch: TTMDBSearchHeader; var SenderTMDB: TTMDB): Boolean;
+function db_FindPrevHeader(var SenderSearch: TSearchHeader_; var DB_: TObjectDataHandle): Boolean;
 begin
-  if dbField_FindPrev(SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindPrev(DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.ID := SenderSearch.FieldSearch.RHeader.ID;
   SenderSearch.CreateTime := SenderSearch.FieldSearch.RHeader.CreateTime;
-  SenderSearch.LastModifyTime := SenderSearch.FieldSearch.RHeader.LastModifyTime;
+  SenderSearch.ModificationTime := SenderSearch.FieldSearch.RHeader.ModificationTime;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := SenderSearch.CompleteCount + 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindFirstItem(const PathName, FilterName: umlString; const ItemExtID: Byte; var SenderSearch: TTMDBSearchItem; var SenderTMDB: TTMDB): Boolean;
+function db_FindFirstItem(const pathName, FilterName: U_String; const ItemExtID: Byte; var SenderSearch: TSearchItem_; var DB_: TObjectDataHandle): Boolean;
 var
-  f    : TField;
-  _Item: TItem;
+  f: TField;
+  itm: TItem;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirstItem(FilterName, ItemExtID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindFirstItem(FilterName, ItemExtID, f.RHeader.CurrentHeader, DB_.IOHnd, SenderSearch.FieldSearch, itm) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
-    end;
-  if dbItem_OnlyReadItemRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, _Item) = False then
-    begin
-      SenderTMDB.Return := _Item.Return;
-      Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
-  SenderSearch.Description := _Item.Description;
-  SenderSearch.ExtID := _Item.ExtID;
-  SenderSearch.Size := _Item.Size;
+  SenderSearch.Description := itm.Description;
+  SenderSearch.ExtID := itm.ExtID;
+  SenderSearch.Size := itm.Size;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindNextItem(var SenderSearch: TTMDBSearchItem; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean;
+function db_FindNextItem(var SenderSearch: TSearchItem_; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
 var
-  _Item: TItem;
+  itm: TItem;
 begin
-  if dbField_FindNextItem(ItemExtID, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindNextItem(ItemExtID, DB_.IOHnd, SenderSearch.FieldSearch, itm) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
-    end;
-  if dbItem_OnlyReadItemRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, _Item) = False then
-    begin
-      SenderTMDB.Return := _Item.Return;
-      Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
-  SenderSearch.Description := _Item.Description;
-  SenderSearch.ExtID := _Item.ExtID;
-  SenderSearch.Size := _Item.Size;
+  SenderSearch.Description := itm.Description;
+  SenderSearch.ExtID := itm.ExtID;
+  SenderSearch.Size := itm.Size;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := SenderSearch.CompleteCount + 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindLastItem(const PathName, FilterName: umlString; const ItemExtID: Byte; var SenderSearch: TTMDBSearchItem; var SenderTMDB: TTMDB): Boolean;
+function db_FindLastItem(const pathName, FilterName: U_String; const ItemExtID: Byte; var SenderSearch: TSearchItem_; var DB_: TObjectDataHandle): Boolean;
 var
-  f    : TField;
-  _Item: TItem;
+  f: TField;
+  itm: TItem;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindLastItem(FilterName, ItemExtID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindLastItem(FilterName, ItemExtID, f.RHeader.CurrentHeader, DB_.IOHnd, SenderSearch.FieldSearch, itm) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
-    end;
-  if dbItem_OnlyReadItemRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, _Item) = False then
-    begin
-      SenderTMDB.Return := _Item.Return;
-      Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
-  SenderSearch.Description := _Item.Description;
-  SenderSearch.ExtID := _Item.ExtID;
-  SenderSearch.Size := _Item.Size;
+  SenderSearch.Description := itm.Description;
+  SenderSearch.ExtID := itm.ExtID;
+  SenderSearch.Size := itm.Size;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindPrevItem(var SenderSearch: TTMDBSearchItem; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean;
+function db_FindPrevItem(var SenderSearch: TSearchItem_; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
 var
-  _Item: TItem;
+  itm: TItem;
 begin
-  if dbField_FindPrevItem(ItemExtID, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindPrevItem(ItemExtID, DB_.IOHnd, SenderSearch.FieldSearch, itm) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
-    end;
-  if dbItem_OnlyReadItemRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, _Item) = False then
-    begin
-      SenderTMDB.Return := _Item.Return;
-      Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
-  SenderSearch.Description := _Item.Description;
-  SenderSearch.ExtID := _Item.ExtID;
-  SenderSearch.Size := _Item.Size;
+  SenderSearch.Description := itm.Description;
+  SenderSearch.ExtID := itm.ExtID;
+  SenderSearch.Size := itm.Size;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := SenderSearch.CompleteCount + 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FastFindFirstItem(const fieldPos: Int64; const FilterName: umlString; const ItemExtID: Byte; var SenderSearch: TTMDBSearchItem; var SenderTMDB: TTMDB): Boolean;
+function db_FastFindFirstItem(const FieldPos: Int64; const FilterName: U_String; const ItemExtID: Byte; var SenderSearch: TSearchItem_; var DB_: TObjectDataHandle): Boolean;
 var
-  _Item: TItem;
+  itm: TItem;
 begin
-  if dbField_FindFirstItem(FilterName, ItemExtID, fieldPos, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindFirstItem(FilterName, ItemExtID, FieldPos, DB_.IOHnd, SenderSearch.FieldSearch, itm) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
-    end;
-  if dbItem_OnlyReadItemRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, _Item) = False then
-    begin
-      SenderTMDB.Return := _Item.Return;
-      Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
-  SenderSearch.Description := _Item.Description;
-  SenderSearch.ExtID := _Item.ExtID;
-  SenderSearch.Size := _Item.Size;
+  SenderSearch.Description := itm.Description;
+  SenderSearch.ExtID := itm.ExtID;
+  SenderSearch.Size := itm.Size;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FastFindNextItem(var SenderSearch: TTMDBSearchItem; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean;
+function db_FastFindNextItem(var SenderSearch: TSearchItem_; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
 var
-  _Item: TItem;
+  itm: TItem;
 begin
-  if dbField_FindNextItem(ItemExtID, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindNextItem(ItemExtID, DB_.IOHnd, SenderSearch.FieldSearch, itm) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
-    end;
-  if dbItem_OnlyReadItemRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, _Item) = False then
-    begin
-      SenderTMDB.Return := _Item.Return;
-      Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
-  SenderSearch.Description := _Item.Description;
-  SenderSearch.ExtID := _Item.ExtID;
-  SenderSearch.Size := _Item.Size;
+  SenderSearch.Description := itm.Description;
+  SenderSearch.ExtID := itm.ExtID;
+  SenderSearch.Size := itm.Size;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := SenderSearch.CompleteCount + 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FastFindLastItem(const fieldPos: Int64; const FilterName: umlString; const ItemExtID: Byte; var SenderSearch: TTMDBSearchItem; var SenderTMDB: TTMDB): Boolean;
+function db_FastFindLastItem(const FieldPos: Int64; const FilterName: U_String; const ItemExtID: Byte; var SenderSearch: TSearchItem_; var DB_: TObjectDataHandle): Boolean;
 var
-  _Item: TItem;
+  itm: TItem;
 begin
-  if dbField_FindLastItem(FilterName, ItemExtID, fieldPos, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindLastItem(FilterName, ItemExtID, FieldPos, DB_.IOHnd, SenderSearch.FieldSearch, itm) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
-    end;
-  if dbItem_OnlyReadItemRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, _Item) = False then
-    begin
-      SenderTMDB.Return := _Item.Return;
-      Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
-  SenderSearch.Description := _Item.Description;
-  SenderSearch.ExtID := _Item.ExtID;
-  SenderSearch.Size := _Item.Size;
+  SenderSearch.Description := itm.Description;
+  SenderSearch.ExtID := itm.ExtID;
+  SenderSearch.Size := itm.Size;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FastFindPrevItem(var SenderSearch: TTMDBSearchItem; const ItemExtID: Byte; var SenderTMDB: TTMDB): Boolean;
+function db_FastFindPrevItem(var SenderSearch: TSearchItem_; const ItemExtID: Byte; var DB_: TObjectDataHandle): Boolean;
 var
-  _Item: TItem;
+  itm: TItem;
 begin
-  if dbField_FindPrevItem(ItemExtID, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindPrevItem(ItemExtID, DB_.IOHnd, SenderSearch.FieldSearch, itm) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
-    end;
-  if dbItem_OnlyReadItemRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, _Item) = False then
-    begin
-      SenderTMDB.Return := _Item.Return;
-      Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
-  SenderSearch.Description := _Item.Description;
-  SenderSearch.ExtID := _Item.ExtID;
-  SenderSearch.Size := _Item.Size;
+  SenderSearch.Description := itm.Description;
+  SenderSearch.ExtID := itm.ExtID;
+  SenderSearch.Size := itm.Size;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := SenderSearch.CompleteCount + 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindFirstField(const PathName, FilterName: umlString; var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean;
+function db_FindFirstField(const pathName, FilterName: U_String; var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindFirst(FilterName, db_Header_FieldID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindFirst(FilterName, DB_Header_Field_ID, f.RHeader.CurrentHeader, DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.Description := f.Description;
   SenderSearch.HeaderCount := f.HeaderCount;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindNextField(var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean;
+function db_FindNextField(var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbField_FindNext(SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindNext(DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.Description := f.Description;
   SenderSearch.HeaderCount := f.HeaderCount;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := SenderSearch.CompleteCount + 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindLastField(const PathName, FilterName: umlString; var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean;
+function db_FindLastField(const pathName, FilterName: U_String; var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbPack_GetField(PathName, f, SenderTMDB) = False then
+  if db_GetField(pathName, f, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_FindLast(FilterName, db_Header_FieldID, f.RHeader.CurrentHeader, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindLast(FilterName, DB_Header_Field_ID, f.RHeader.CurrentHeader, DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.Description := f.Description;
   SenderSearch.HeaderCount := f.HeaderCount;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FindPrevField(var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean;
+function db_FindPrevField(var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbField_FindPrev(SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindPrev(DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.Description := f.Description;
   SenderSearch.HeaderCount := f.HeaderCount;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := SenderSearch.CompleteCount + 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FastFindFirstField(const fieldPos: Int64; const FilterName: umlString; var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean;
+function db_FastFindFirstField(const FieldPos: Int64; const FilterName: U_String; var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbField_FindFirst(FilterName, db_Header_FieldID, fieldPos, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindFirst(FilterName, DB_Header_Field_ID, FieldPos, DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.Description := f.Description;
   SenderSearch.HeaderCount := f.HeaderCount;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FastFindNextField(var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean;
+function db_FastFindNextField(var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbField_FindNext(SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindNext(DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.Description := f.Description;
   SenderSearch.HeaderCount := f.HeaderCount;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := SenderSearch.CompleteCount + 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FastFindLastField(const fieldPos: Int64; const FilterName: umlString; var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean;
+function db_FastFindLastField(const FieldPos: Int64; const FilterName: U_String; var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbField_FindLast(FilterName, db_Header_FieldID, fieldPos, SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindLast(FilterName, DB_Header_Field_ID, FieldPos, DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.Description := f.Description;
   SenderSearch.HeaderCount := f.HeaderCount;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_FastFindPrevField(var SenderSearch: TTMDBSearchField; var SenderTMDB: TTMDB): Boolean;
+function db_FastFindPrevField(var SenderSearch: TSearchField_; var DB_: TObjectDataHandle): Boolean;
 var
   f: TField;
 begin
-  if dbField_FindPrev(SenderTMDB.RecFile, SenderSearch.FieldSearch) = False then
+  if dbField_FindPrev(DB_.IOHnd, SenderSearch.FieldSearch) = False then
     begin
-      SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+      DB_.State := SenderSearch.FieldSearch.State;
       Result := False;
-      Exit;
+      exit;
     end;
-  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataMainPOS, SenderTMDB.RecFile, f) = False then
+  if dbField_OnlyReadFieldRec(SenderSearch.FieldSearch.RHeader.DataPosition, DB_.IOHnd, f) = False then
     begin
-      SenderTMDB.Return := f.Return;
+      DB_.State := f.State;
       Result := False;
-      Exit;
+      exit;
     end;
   SenderSearch.Name := SenderSearch.FieldSearch.RHeader.Name;
   SenderSearch.Description := f.Description;
   SenderSearch.HeaderCount := f.HeaderCount;
   SenderSearch.HeaderPOS := SenderSearch.FieldSearch.RHeader.CurrentHeader;
   SenderSearch.CompleteCount := SenderSearch.CompleteCount + 1;
-  SenderTMDB.Return := SenderSearch.FieldSearch.Return;
+  DB_.State := SenderSearch.FieldSearch.State;
   Result := True;
 end;
 
-function dbPack_RecursionSearchFirst(const InitPath, FilterName: umlString; var SenderRecursionSearch: TTMDBRecursionSearch; var SenderTMDB: TTMDB): Boolean;
+function db_RecursionSearchFirst(const InitPath, FilterName: U_String; var SenderRecursionSearch: TRecursionSearch_; var DB_: TObjectDataHandle): Boolean;
 begin
-  if dbPack_GetField(InitPath, SenderRecursionSearch.CurrentField, SenderTMDB) = False then
+  if db_GetField(InitPath, SenderRecursionSearch.CurrentField, DB_) = False then
     begin
       Result := False;
-      Exit;
+      exit;
     end;
   SenderRecursionSearch.SearchBuffGo := 0;
-  if dbField_FindFirst(FilterName, db_Header_ItemID, SenderRecursionSearch.CurrentField.RHeader.CurrentHeader, SenderTMDB.RecFile,
+  if dbField_FindFirst(FilterName, DB_Header_Item_ID, SenderRecursionSearch.CurrentField.RHeader.CurrentHeader, DB_.IOHnd,
     SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) = False then
     begin
-      if dbField_FindFirst('*', db_Header_FieldID, SenderRecursionSearch.CurrentField.RHeader.CurrentHeader, SenderTMDB.RecFile,
+      if dbField_FindFirst('*', DB_Header_Field_ID, SenderRecursionSearch.CurrentField.RHeader.CurrentHeader, DB_.IOHnd,
         SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) = False then
         begin
-          SenderTMDB.Return := SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].Return;
+          DB_.State := SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].State;
           Result := False;
-          Exit;
+          exit;
         end;
-      if dbField_OnlyReadFieldRec(SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader.DataMainPOS, SenderTMDB.RecFile, SenderRecursionSearch.CurrentField) = False
+      if dbField_OnlyReadFieldRec(SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader.DataPosition, DB_.IOHnd, SenderRecursionSearch.CurrentField) = False
       then
         begin
-          SenderTMDB.Return := SenderRecursionSearch.CurrentField.Return;
+          DB_.State := SenderRecursionSearch.CurrentField.State;
           Result := False;
-          Exit;
+          exit;
         end;
       SenderRecursionSearch.CurrentField.RHeader := SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader;
       SenderRecursionSearch.ReturnHeader := SenderRecursionSearch.CurrentField.RHeader;
@@ -6261,131 +7006,129 @@ begin
       SenderRecursionSearch.ReturnHeader := SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader;
   SenderRecursionSearch.InitPath := InitPath;
   SenderRecursionSearch.FilterName := FilterName;
-  SenderTMDB.Return := db_Pack_ok;
+  DB_.State := DB_ok;
   Result := True;
 end;
 
-function dbPack_RecursionSearchNext(var SenderRecursionSearch: TTMDBRecursionSearch; var SenderTMDB: TTMDB): Boolean;
+function db_RecursionSearchNext(var SenderRecursionSearch: TRecursionSearch_; var DB_: TObjectDataHandle): Boolean;
 begin
   case SenderRecursionSearch.ReturnHeader.ID of
-    db_Header_FieldID:
+    DB_Header_Field_ID:
       begin
-        if dbField_FindFirst(SenderRecursionSearch.FilterName, db_Header_ItemID, SenderRecursionSearch.CurrentField.RHeader.CurrentHeader, SenderTMDB.RecFile,
-          SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) = True then
+        if dbField_FindFirst(SenderRecursionSearch.FilterName, DB_Header_Item_ID, SenderRecursionSearch.CurrentField.RHeader.CurrentHeader, DB_.IOHnd,
+          SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) then
           begin
             SenderRecursionSearch.ReturnHeader := SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader;
-            SenderTMDB.Return := db_Pack_ok;
+            DB_.State := DB_ok;
             Result := True;
-            Exit;
+            exit;
           end;
-        if dbField_FindFirst('*', db_Header_FieldID, SenderRecursionSearch.CurrentField.RHeader.CurrentHeader, SenderTMDB.RecFile,
-          SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) = True then
+        if dbField_FindFirst('*', DB_Header_Field_ID, SenderRecursionSearch.CurrentField.RHeader.CurrentHeader, DB_.IOHnd,
+          SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) then
           begin
-            if dbField_OnlyReadFieldRec(SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader.DataMainPOS, SenderTMDB.RecFile,
+            if dbField_OnlyReadFieldRec(SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader.DataPosition, DB_.IOHnd,
               SenderRecursionSearch.CurrentField) = False then
               begin
-                SenderTMDB.Return := SenderRecursionSearch.CurrentField.Return;
+                DB_.State := SenderRecursionSearch.CurrentField.State;
                 Result := False;
-                Exit;
+                exit;
               end;
             SenderRecursionSearch.CurrentField.RHeader := SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader;
             SenderRecursionSearch.ReturnHeader := SenderRecursionSearch.CurrentField.RHeader;
             SenderRecursionSearch.SearchBuffGo := SenderRecursionSearch.SearchBuffGo + 1;
-            SenderTMDB.Return := db_Pack_ok;
+            DB_.State := DB_ok;
             Result := True;
-            Exit;
+            exit;
           end;
 
         if SenderRecursionSearch.SearchBuffGo = 0 then
           begin
-            SenderTMDB.Return := db_Pack_RecursionSearchOver;
+            DB_.State := DB_RecursionSearchOver;
             Result := False;
-            Exit;
+            exit;
           end;
         SenderRecursionSearch.SearchBuffGo := SenderRecursionSearch.SearchBuffGo - 1;
-        while dbField_FindNext(SenderTMDB.RecFile, SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) = False do
+        while dbField_FindNext(DB_.IOHnd, SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) = False do
           begin
             if SenderRecursionSearch.SearchBuffGo = 0 then
               begin
-                SenderTMDB.Return := db_Pack_RecursionSearchOver;
+                DB_.State := DB_RecursionSearchOver;
                 Result := False;
-                Exit;
+                exit;
               end;
             SenderRecursionSearch.SearchBuffGo := SenderRecursionSearch.SearchBuffGo - 1;
           end;
 
-        if dbField_OnlyReadFieldRec(SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader.DataMainPOS, SenderTMDB.RecFile, SenderRecursionSearch.CurrentField)
-          = False then
+        if dbField_OnlyReadFieldRec(SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader.DataPosition, DB_.IOHnd, SenderRecursionSearch.CurrentField) = False then
           begin
-            SenderTMDB.Return := SenderRecursionSearch.CurrentField.Return;
+            DB_.State := SenderRecursionSearch.CurrentField.State;
             Result := False;
-            Exit;
+            exit;
           end;
         SenderRecursionSearch.CurrentField.RHeader := SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader;
         SenderRecursionSearch.ReturnHeader := SenderRecursionSearch.CurrentField.RHeader;
         SenderRecursionSearch.SearchBuffGo := SenderRecursionSearch.SearchBuffGo + 1;
-        SenderTMDB.Return := db_Pack_ok;
+        DB_.State := DB_ok;
         Result := True;
-        Exit;
+        exit;
       end;
-    db_Header_ItemID:
+    DB_Header_Item_ID:
       begin
-        if dbField_FindNext(SenderTMDB.RecFile, SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) = True then
+        if dbField_FindNext(DB_.IOHnd, SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) then
           begin
             SenderRecursionSearch.ReturnHeader := SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader;
-            SenderTMDB.Return := db_Pack_ok;
+            DB_.State := DB_ok;
             Result := True;
-            Exit;
+            exit;
           end;
-        if dbField_FindFirst('*', db_Header_FieldID, SenderRecursionSearch.CurrentField.RHeader.CurrentHeader, SenderTMDB.RecFile,
-          SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) = True then
+        if dbField_FindFirst('*', DB_Header_Field_ID, SenderRecursionSearch.CurrentField.RHeader.CurrentHeader, DB_.IOHnd,
+          SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) then
           begin
-            if dbField_OnlyReadFieldRec(SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader.DataMainPOS, SenderTMDB.RecFile,
+            if dbField_OnlyReadFieldRec(SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader.DataPosition, DB_.IOHnd,
               SenderRecursionSearch.CurrentField) = False then
               begin
-                SenderTMDB.Return := SenderRecursionSearch.CurrentField.Return;
+                DB_.State := SenderRecursionSearch.CurrentField.State;
                 Result := False;
-                Exit;
+                exit;
               end;
             SenderRecursionSearch.CurrentField.RHeader := SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader;
             SenderRecursionSearch.ReturnHeader := SenderRecursionSearch.CurrentField.RHeader;
             SenderRecursionSearch.SearchBuffGo := SenderRecursionSearch.SearchBuffGo + 1;
-            SenderTMDB.Return := db_Pack_ok;
+            DB_.State := DB_ok;
             Result := True;
-            Exit;
+            exit;
           end;
 
         if SenderRecursionSearch.SearchBuffGo = 0 then
           begin
-            SenderTMDB.Return := db_Pack_RecursionSearchOver;
+            DB_.State := DB_RecursionSearchOver;
             Result := False;
-            Exit;
+            exit;
           end;
         SenderRecursionSearch.SearchBuffGo := SenderRecursionSearch.SearchBuffGo - 1;
-        while dbField_FindNext(SenderTMDB.RecFile, SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) = False do
+        while dbField_FindNext(DB_.IOHnd, SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo]) = False do
           begin
             if SenderRecursionSearch.SearchBuffGo = 0 then
               begin
-                SenderTMDB.Return := db_Pack_RecursionSearchOver;
+                DB_.State := DB_RecursionSearchOver;
                 Result := False;
-                Exit;
+                exit;
               end;
             SenderRecursionSearch.SearchBuffGo := SenderRecursionSearch.SearchBuffGo - 1;
           end;
 
-        if dbField_OnlyReadFieldRec(SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader.DataMainPOS, SenderTMDB.RecFile, SenderRecursionSearch.CurrentField)
-          = False then
+        if dbField_OnlyReadFieldRec(SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader.DataPosition, DB_.IOHnd, SenderRecursionSearch.CurrentField) = False then
           begin
-            SenderTMDB.Return := SenderRecursionSearch.CurrentField.Return;
+            DB_.State := SenderRecursionSearch.CurrentField.State;
             Result := False;
-            Exit;
+            exit;
           end;
         SenderRecursionSearch.CurrentField.RHeader := SenderRecursionSearch.SearchBuff[SenderRecursionSearch.SearchBuffGo].RHeader;
         SenderRecursionSearch.ReturnHeader := SenderRecursionSearch.CurrentField.RHeader;
         SenderRecursionSearch.SearchBuffGo := SenderRecursionSearch.SearchBuffGo + 1;
-        SenderTMDB.Return := db_Pack_ok;
+        DB_.State := DB_ok;
         Result := True;
-        Exit;
+        exit;
       end;
     else
       begin

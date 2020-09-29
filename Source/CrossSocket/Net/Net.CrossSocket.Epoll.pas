@@ -19,6 +19,7 @@ uses
   Posix.NetinetIn,
   Posix.UniStd,
   Posix.NetDB,
+  Posix.Pthread,
   Posix.Errno,
   Linux.epoll,
   Net.SocketAPI,
@@ -103,6 +104,7 @@ type
   TEpollCrossSocket = class(TAbstractCrossSocket)
   private const
     MAX_EVENT_COUNT = 2048;
+    SHUTDOWN_FLAG   = UInt64(-1);
   private class threadvar
     FEventList: array [0..MAX_EVENT_COUNT-1] of TEPoll_Event;
   private
@@ -110,6 +112,12 @@ type
     FIoThreads: TArray<TIoEventThread>;
     FIdleHandle: THandle;
     FIdleLock: TObject;
+    FStopHandle: THandle;
+
+    // 利用 eventfd 唤醒并退出IO线程
+    procedure _OpenStopHandle; inline;
+    procedure _PostStopCommand; inline;
+    procedure _CloseStopHandle; inline;
 
     procedure _OpenIdleHandle; inline;
     procedure _CloseIdleHandle; inline;
@@ -193,18 +201,18 @@ begin
   LEvent.Events := EPOLLET or EPOLLONESHOT;
   LEvent.Data.u64 := Self.UID;
 
-  if _ReadEnabled then
-    LEvent.Events := LEvent.Events or EPOLLIN;
+  if _ReadEnabled then
+    LEvent.Events := LEvent.Events or EPOLLIN;
 
-  Result := (epoll_ctl(LOwner.FEpollHandle, FOpCode, Socket, @LEvent) >= 0);
-  FOpCode := EPOLL_CTL_MOD;
+  Result := (epoll_ctl(LOwner.FEpollHandle, FOpCode, Socket, @LEvent) >= 0);
+  FOpCode := EPOLL_CTL_MOD;
 
-  {$IFDEF DEBUG}
-  if not Result then
-    _Log('listen %d epoll_ctl error %d', [UID, GetLastError]);
-  {$ENDIF}
-end;
-
+  {$IFDEF DEBUG}
+  if not Result then
+    _Log('listen %d epoll_ctl error %d', [UID, GetLastError]);
+  {$ENDIF}
+end;
+
 { TSendQueue }
 
 procedure TSendQueue.Notify(const Value: PSendItem;
@@ -302,22 +310,23 @@ begin
   LEvent.Events := EPOLLET or EPOLLONESHOT;
   LEvent.Data.u64 := Self.UID;
 
-  if _ReadEnabled then
-    LEvent.Events := LEvent.Events or EPOLLIN;
+  if _ReadEnabled then
+    LEvent.Events := LEvent.Events or EPOLLIN;
 
-  if _WriteEnabled then
-    LEvent.Events := LEvent.Events or EPOLLOUT;
+  if _WriteEnabled then
+    LEvent.Events := LEvent.Events or EPOLLOUT;
 
-  Result := (epoll_ctl(LOwner.FEpollHandle, FOpCode, Socket, @LEvent) >= 0);
-  FOpCode := EPOLL_CTL_MOD;
+  Result := (epoll_ctl(LOwner.FEpollHandle, FOpCode, Socket, @LEvent) >= 0);
+  FOpCode := EPOLL_CTL_MOD;
 
-  {$IFDEF DEBUG}
-  if not Result then
-    _Log('connection %.16x epoll_ctl socket=%d events=0x%.8x error %d',
-      [UID, LEvent.Events, Socket, GetLastError]);
-  {$ENDIF}
-end;
-
+  {$IFDEF DEBUG}
+  if not Result then
+    _Log('connection %.16x epoll_ctl socket=%d events=0x%.8x error %d',
+      [UID, LEvent.Events, Socket, GetLastError]);
+  {$ENDIF}
+end;
+
+
 function TEpollConnection._WriteEnabled: Boolean;
 begin
   Result := (ieWrite in FIoEvents);
@@ -342,6 +351,11 @@ end;
 procedure TEpollCrossSocket._CloseIdleHandle;
 begin
   FileClose(FIdleHandle);
+end;
+
+procedure TEpollCrossSocket._CloseStopHandle;
+begin
+  FileClose(FStopHandle);
 end;
 
 procedure TEpollCrossSocket._HandleAccept(AListen: ICrossListen);
@@ -387,25 +401,34 @@ begin
       Break;
     end;
 
+    // 边缘化触发连接请求模式，如果有多个连接，是全部放在一起处理
+    // 这里的accept与windows不同，这里需要全部accept以后，发现有问题再去立即关闭，没有windows的预处理概念
+    // 假如Accept不允许，那么后续请求队列将会全部禁止连接，直到到请求队列为空
+    if not TriggerAccept(AListen) then
+      begin
+        TSocketAPI.CloseSocket(LSocket);
+        continue;
+      end;
+
     LClientSocket := LSocket;
     TSocketAPI.SetNonBlock(LClientSocket, True);
     SetKeepAlive(LClientSocket);
+    TSocketAPI.SetTcpNoDelay(LClientSocket, True);
 
     LConnection := CreateConnection(Self, LClientSocket, ctAccept);
     TriggerConnecting(LConnection);
+    TriggerConnected(LConnection);
 
     // 连接建立后监视Socket的读事件
     LEpConnection := LConnection as TEpollConnection;
     LEpConnection._Lock;
     try
       LSuccess := LEpConnection._UpdateIoEvent([ieRead]);
-    finally
-      LEpConnection._Unlock;
-    end;
-
-    if LSuccess then
-      TriggerConnected(LConnection)
-    else
+    finally
+      LEpConnection._Unlock;
+    end;
+
+    if not LSuccess then
       LConnection.Close;
   end;
 end;
@@ -429,7 +452,8 @@ begin
   end;
 
   LEpConnection := LConnection as TEpollConnection;
-  LEpConnection._Lock;
+
+  LEpConnection._Lock;
   try
     LConnectCallback := LEpConnection.FConnectCallback;
     LEpConnection.FConnectCallback := nil;
@@ -495,62 +519,89 @@ var
   LCallback: TProc<ICrossConnection, Boolean>;
   LSent: Integer;
 begin
+  // 查阅了资料，linux和unit系统级的io函数都会很安静，不会像windows，动不动就给你抛个异常，处于易读性和调试需要，我干掉了改队列缓存操作的try部分
   LConnection := AConnection;
   LEpConnection := LConnection as TEpollConnection;
 
   LEpConnection._Lock;
-  try
+
+  // 队列中没有数据了, 清除 ioWrite 标志
+  if (LEpConnection.FSendQueue.Count <= 0) then
+  begin
+    LEpConnection._UpdateIoEvent([]);
+    LEpConnection._Unlock;
+    Exit;
+  end;
+
+  // 获取Socket发送队列中的第一条数据
+  LSendItem := LEpConnection.FSendQueue.Items[0];
+
+  // 发送数据
+  LSent := PosixSend(LConnection.Socket, LSendItem.Data, LSendItem.Size);
+
+  {$region '全部发送完成'}
+  if (LSent >= LSendItem.Size) then
+  begin
+    // 先保存回调函数, 避免后面删除队列后将其释放
+    LCallback := LSendItem.Callback;
+
+    // 发送成功, 移除已发送成功的数据
+    if (LEpConnection.FSendQueue.Count > 0) then
+      LEpConnection.FSendQueue.Delete(0);
+
     // 队列中没有数据了, 清除 ioWrite 标志
     if (LEpConnection.FSendQueue.Count <= 0) then
-    begin
       LEpConnection._UpdateIoEvent([]);
-      Exit;
-    end;
 
-    // 获取Socket发送队列中的第一条数据
-    LSendItem := LEpConnection.FSendQueue.Items[0];
-
-    // 发送数据
-    LSent := PosixSend(LConnection.Socket, LSendItem.Data, LSendItem.Size);
-
-    {$region '全部发送完成'}
-    if (LSent >= LSendItem.Size) then
-    begin
-      // 先保存回调函数, 避免后面删除队列后将其释放
-      LCallback := LSendItem.Callback;
-
-      // 发送成功, 移除已发送成功的数据
-      if (LEpConnection.FSendQueue.Count > 0) then
-        LEpConnection.FSendQueue.Delete(0);
-
-      // 队列中没有数据了, 清除 ioWrite 标志
-      if (LEpConnection.FSendQueue.Count <= 0) then
-        LEpConnection._UpdateIoEvent([]);
-
-      if Assigned(LCallback) then
-        LCallback(LConnection, True);
-
-      Exit;
-    end;
-    {$endregion}
-
-    {$region '连接断开或发送错误'}
-    // 发送失败的回调会在连接对象的destroy方法中被调用
-    if (LSent < 0) then Exit;
-    {$endregion}
-
-    {$region '部分发送成功,在下一次唤醒发送线程时继续处理剩余部分'}
-    Dec(LSendItem.Size, LSent);
-    Inc(LSendItem.Data, LSent);
-    {$endregion}
-  finally
+    // 由于epoll要管理数据发送队列，每次发送前，队列都要被锁定，当队列操作完成，才去解锁，这里在发送以后，还保持了锁定
+    // 外部程序在回调事件继续发送下一段数据，会导致外面的程序被锁死，如果在外围解决，正解需要抛出一个后置事件，实现太麻烦，直接修改流程
+    // 查阅了资料，linux和unit系统级的io函数都会很安静，不会像windows，动不动就给你抛个异常，处于易读性和调试需要，我干掉了改队列缓存操作的try部分
+    // 其它地方一切正常，by qq600585
     LEpConnection._Unlock;
+
+    if Assigned(LCallback) then
+      LCallback(LConnection, True);
+
+    Exit;
   end;
+  {$endregion}
+
+  // 发送失败的回调会在连接对象的destroy方法中被调用
+  if (LSent > 0) then
+  begin
+    {$region '部分发送成功,在下一次唤醒发送线程时继续处理剩余部分'}
+    dec(LSendItem.Size, LSent);
+    inc(LSendItem.Data, LSent);
+    {$endregion}
+  end;
+  LEpConnection._Unlock;
 end;
-
+
+
 procedure TEpollCrossSocket._OpenIdleHandle;
 begin
   FIdleHandle := FileOpen('/dev/null', fmOpenRead);
+end;
+
+procedure TEpollCrossSocket._OpenStopHandle;
+var
+  LEvent: TEPoll_Event;
+begin
+  FStopHandle := eventfd(0, 0);
+  // 这里不使用 EPOLLET
+  // 这样可以保证通知退出的命令发出后, 所有IO线程都会收到
+  LEvent.Events := EPOLLIN;
+  LEvent.Data.u64 := SHUTDOWN_FLAG;
+  epoll_ctl(FEpollHandle, EPOLL_CTL_ADD, FStopHandle, @LEvent);
+end;
+
+procedure TEpollCrossSocket._PostStopCommand;
+var
+  LStuff: UInt64;
+begin
+  LStuff := 1;
+  // 往 FStopHandle 写入任意数据, 唤醒工作线程
+  Posix.UniStd.__write(FStopHandle, @LStuff, SizeOf(LStuff));
 end;
 
 procedure TEpollCrossSocket.StartLoop;
@@ -569,11 +620,14 @@ begin
   SetLength(FIoThreads, GetIoThreads);
   for I := 0 to Length(FIoThreads) - 1 do
     FIoThreads[I] := TIoEventThread.Create(Self);
+
+  _OpenStopHandle;
 end;
 
 procedure TEpollCrossSocket.StopLoop;
 var
   I: Integer;
+  LCurrentThreadID: TThreadID;
 begin
   if (FIoThreads = nil) then Exit;
 
@@ -581,16 +635,22 @@ begin
 
   while (FListensCount > 0) or (FConnectionsCount > 0) do Sleep(1);
 
-  Posix.UniStd.__close(FEpollHandle);
+  _PostStopCommand;
 
+  LCurrentThreadID := GetCurrentThreadId;
   for I := 0 to Length(FIoThreads) - 1 do
   begin
+    if (FIoThreads[I].ThreadID = LCurrentThreadID) then
+      raise ECrossSocket.Create('不能在IO线程中执行StopLoop!');
+
     FIoThreads[I].WaitFor;
     FreeAndNil(FIoThreads[I]);
   end;
   FIoThreads := nil;
 
+  FileClose(FEpollHandle);
   _CloseIdleHandle;
+  _CloseStopHandle;
 end;
 
 procedure TEpollCrossSocket.Connect(const AHost: string; APort: Word;
@@ -736,6 +796,9 @@ begin
       TSocketAPI.SetNonBlock(LListenSocket, True);
       TSocketAPI.SetReUseAddr(LListenSocket, True);
 
+      if (LAddrInfo.ai_family = AF_INET6) then
+        TSocketAPI.SetSockOpt<Integer>(LListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, 1);
+
       if (TSocketAPI.Bind(LListenSocket, LAddrInfo.ai_addr, LAddrInfo.ai_addrlen) < 0)
         or (TSocketAPI.Listen(LListenSocket) < 0) then
       begin
@@ -754,13 +817,14 @@ begin
         LSuccess := LEpListen._UpdateIoEvent([ieRead]);
       finally
         LEpListen._Unlock;
-      end;
+      end;
 
       if not LSuccess then
       begin
-        _Failed;
-        Exit;
-      end;
+        _Failed;
+
+        Exit;
+      end;
 
       // 监听成功
       TriggerListened(LListen);
@@ -792,8 +856,9 @@ begin
   LSendItem.Size := ALen;
   LSendItem.Callback := ACallback;
 
-  LEpConnection := AConnection as TEpollConnection;
-  LEpConnection._Lock;
+  LEpConnection := AConnection as TEpollConnection;
+
+  LEpConnection._Lock;
   try
     // 将数据放入队列
     LEpConnection.FSendQueue.Add(LSendItem);
@@ -823,10 +888,8 @@ var
   LSuccess: Boolean;
   LIoEvents: TIoEvents;
 begin
-  // 如果不指定超时时间, 即使在其它线程将 epoll 句柄关闭, epoll_wait 也不会返回
-  // 超时后都没有任何IO事件发生会返回0
   // 被系统信号打断或者出错会返回-1, 具体需要根据错误代码判断
-  LRet := epoll_wait(FEpollHandle, @FEventList[0], MAX_EVENT_COUNT, 100);
+  LRet := epoll_wait(FEpollHandle, @FEventList[0], MAX_EVENT_COUNT, -1);
   if (LRet < 0) then
   begin
     LRet := GetLastError;
@@ -837,6 +900,9 @@ begin
   for I := 0 to LRet - 1 do
   begin
     LEvent := FEventList[I];
+
+    // 收到退出命令
+    if (LEvent.Data.u64 = SHUTDOWN_FLAG) then Exit(False);
 
     {$region '获取连接或监听对象'}
     LCrossUID := LEvent.Data.u64;
@@ -885,8 +951,8 @@ begin
       LEpListen := LListen as TEpollListen;
       LEpListen._Lock;
       LEpListen._UpdateIoEvent([ieRead]);
-      LEpListen._Unlock;
-    end else
+      LEpListen._Unlock;
+    end else
     if (LConnection <> nil) then
     begin
       // epoll的读写事件同一时间可能两个同时触发

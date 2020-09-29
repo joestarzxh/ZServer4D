@@ -1,16 +1,31 @@
 { ****************************************************************************** }
 { * single tunnel IO framework(incl auth service)                              * }
 { * written by QQ 600585@qq.com                                                * }
+{ * https://zpascal.net                                                        * }
+{ * https://github.com/PassByYou888/zAI                                        * }
+{ * https://github.com/PassByYou888/ZServer4D                                  * }
+{ * https://github.com/PassByYou888/PascalString                               * }
+{ * https://github.com/PassByYou888/zRasterization                             * }
 { * https://github.com/PassByYou888/CoreCipher                                 * }
-(* https://github.com/PassByYou888/ZServer4D *)
+{ * https://github.com/PassByYou888/zSound                                     * }
+{ * https://github.com/PassByYou888/zChinese                                   * }
+{ * https://github.com/PassByYou888/zExpression                                * }
+{ * https://github.com/PassByYou888/zGameWare                                  * }
+{ * https://github.com/PassByYou888/zAnalysis                                  * }
+{ * https://github.com/PassByYou888/FFMPEG-Header                              * }
+{ * https://github.com/PassByYou888/zTranslate                                 * }
+{ * https://github.com/PassByYou888/InfiniteIoT                                * }
+{ * https://github.com/PassByYou888/FastMD5                                    * }
 { ****************************************************************************** }
+(*
+  update history
+*)
 
 unit CommunicationFrameworkIO;
 
+{$INCLUDE zDefine.inc}
+
 interface
-
-{$I zDefine.inc}
-
 
 uses CoreClasses, ListEngine, UnicodeMixedLib,
   DataFrameEngine, MemoryStream64, CommunicationFramework, TextDataEngine,
@@ -21,30 +36,30 @@ type
 
   TPeerClientUserDefineForIO = class(TPeerClientUserDefine)
   public
-    UserFlag, UserID: string;
-    UserPath        : string;
-    UserConfigFile  : TSectionTextData;
-    UserAuthService : TCommunicationFramework_UserAuthService;
-    UserDBIntf      : THashVariantList;
-    LoginSuccessed  : Boolean;
+    UserFlag, UserID: SystemString;
+    UserPath: SystemString;
+    UserConfigFile: TSectionTextData;
+    UserAuthService: TCommunicationFramework_UserAuthService;
+    UserDBIntf: THashVariantList;
+    LoginSuccessed: Boolean;
 
-    constructor Create(AOwner: TPeerClient); override;
+    constructor Create(Owner_: TPeerIO); override;
     destructor Destroy; override;
 
-    function MakeFilePath(fn: string): string;
-    function GetUserID: string;
+    function MakeFilePath(fn: SystemString): SystemString;
+    function GetUserID: SystemString;
   end;
 
   TCommunicationFramework_UserAuthService = class(TCoreClassObject)
   protected
-    FRootPath          : string;
-    FUserDB            : TSectionTextData;
+    FRootPath: SystemString;
+    FUserDB: TSectionTextData;
     FCanRegisterNewUser: Boolean;
-    FCanSaveUserInfo   : Boolean;
-    FLoginUserList     : THashVariantList;
+    FCanSaveUserInfo: Boolean;
+    FLoginUserList: THashVariantList;
   protected
-    procedure Command_UserLogin(Sender: TPeerClient; InData, OutData: TDataFrameEngine); virtual;
-    procedure Command_RegisterUser(Sender: TPeerClient; InData, OutData: TDataFrameEngine); virtual;
+    procedure Command_UserLogin(Sender: TPeerIO; InData, OutData: TDataFrameEngine); virtual;
+    procedure Command_RegisterUser(Sender: TPeerIO; InData, OutData: TDataFrameEngine); virtual;
   public
     Communication: TCommunicationFramework;
 
@@ -60,11 +75,11 @@ type
     procedure RegisterCommand; virtual;
     procedure UnRegisterCommand; virtual;
 
-    function MakeUserFlag: string;
-    function GetUserDefineClient(cli: TPeerClient): TPeerClientUserDefineForIO;
+    function MakeUserFlag: SystemString;
+    function GetUserDefineClient(cli: TPeerIO): TPeerClientUserDefineForIO;
 
     property CanRegisterNewUser: Boolean read FCanRegisterNewUser write FCanRegisterNewUser;
-    property RootPath: string read FRootPath;
+    property RootPath: SystemString read FRootPath;
     property CanSaveUserInfo: Boolean read FCanSaveUserInfo write FCanSaveUserInfo;
     property LoginUserList: THashVariantList read FLoginUserList;
   end;
@@ -85,26 +100,21 @@ type
     procedure RegisterCommand; virtual;
     procedure UnRegisterCommand; virtual;
 
-    function UserLogin(UserID, Passwd: string): Boolean;
-    function RegisterUser(UserID, Passwd: string): Boolean;
+    function UserLogin(UserID, passwd: SystemString): Boolean;
+    function RegisterUser(UserID, passwd: SystemString): Boolean;
   end;
 
 implementation
 
-{$IFDEF FPC}
-
-
 uses SysUtils;
-{$ELSE}
 
+const
+  C_UserLogin = 'UserLogin';
+  C_RegisterUser = 'RegisterUser';
 
-uses SysUtils, IOUtils;
-{$ENDIF}
-
-
-constructor TPeerClientUserDefineForIO.Create(AOwner: TPeerClient);
+constructor TPeerClientUserDefineForIO.Create(Owner_: TPeerIO);
 begin
-  inherited Create(AOwner);
+  inherited Create(Owner_);
   UserFlag := '';
   UserID := '';
   UserPath := '';
@@ -118,12 +128,7 @@ destructor TPeerClientUserDefineForIO.Destroy;
 begin
   if LoginSuccessed then
     begin
-      LockObject(UserAuthService.FLoginUserList);
-      try
-          UserAuthService.FLoginUserList.Delete(UserID);
-      except
-      end;
-      UnLockObject(UserAuthService.FLoginUserList);
+      UserAuthService.FLoginUserList.Delete(UserID);
     end;
 
   try
@@ -134,20 +139,20 @@ begin
   inherited Destroy;
 end;
 
-function TPeerClientUserDefineForIO.MakeFilePath(fn: string): string;
+function TPeerClientUserDefineForIO.MakeFilePath(fn: SystemString): SystemString;
 begin
   Result := umlCombineFileName(UserPath, fn);
 end;
 
-function TPeerClientUserDefineForIO.GetUserID: string;
+function TPeerClientUserDefineForIO.GetUserID: SystemString;
 begin
   Result := UserConfigFile.GetDefaultValue('UserInfo', 'UserID', '');
 end;
 
-procedure TCommunicationFramework_UserAuthService.Command_UserLogin(Sender: TPeerClient; InData, OutData: TDataFrameEngine);
+procedure TCommunicationFramework_UserAuthService.Command_UserLogin(Sender: TPeerIO; InData, OutData: TDataFrameEngine);
 var
-  UserID, UserPasswd: string;
-  UserDefineIO      : TPeerClientUserDefineForIO;
+  UserID, UserPasswd: SystemString;
+  UserDefineIO: TPeerClientUserDefineForIO;
 begin
   UserID := InData.Reader.ReadString;
   UserPasswd := InData.Reader.ReadString;
@@ -159,16 +164,14 @@ begin
       Exit;
     end;
 
-  LockObject(FLoginUserList);
   if FLoginUserList.Exists(UserID) then
     begin
       OutData.WriteBool(False);
       OutData.WriteString(Format('user already online:%s', [UserID]));
       Exit;
     end;
-  UnLockObject(FLoginUserList);
 
-  if not ComparePassword(TCipherStyle.csDES64, UserPasswd, string(FUserDB.GetDefaultValue(UserID, 'password', ''))) then
+  if not CompareQuantumCryptographyPassword(UserPasswd, SystemString(FUserDB.GetDefaultValue(UserID, 'password', ''))) then
     begin
       OutData.WriteBool(False);
       OutData.WriteString(Format('password error', []));
@@ -188,19 +191,17 @@ begin
       UserDefineIO.UserConfigFile.LoadFromFile(UserDefineIO.MakeFilePath('User.Config'));
   UserDefineIO.UserConfigFile.Hit['UserInfo', 'UserID'] := UserID;
 
-  LockObject(FLoginUserList);
   FLoginUserList[UserID] := Now;
-  UnLockObject(FLoginUserList);
 
   OutData.WriteBool(True);
   OutData.WriteString(Format('success Login:%s', [UserID]));
   OutData.WriteString(UserDefineIO.UserFlag);
 end;
 
-procedure TCommunicationFramework_UserAuthService.Command_RegisterUser(Sender: TPeerClient; InData, OutData: TDataFrameEngine);
+procedure TCommunicationFramework_UserAuthService.Command_RegisterUser(Sender: TPeerIO; InData, OutData: TDataFrameEngine);
 var
-  UserID, UserPasswd: string;
-  UserDefineIO      : TPeerClientUserDefineForIO;
+  UserID, UserPasswd: SystemString;
+  UserDefineIO: TPeerClientUserDefineForIO;
 begin
   if not FCanRegisterNewUser then
     begin
@@ -211,7 +212,7 @@ begin
   UserID := InData.Reader.ReadString;
   UserPasswd := InData.Reader.ReadString;
 
-  if umlExistsLimitChar(UserID, '[]:'#13#10#9#8#0) then
+  if umlExistsChar(UserID, '[]:'#13#10#9#8#0) then
     begin
       OutData.WriteBool(False);
       OutData.WriteString(Format('user name Illegal:%s', [UserID]));
@@ -225,14 +226,12 @@ begin
       Exit;
     end;
 
-  LockObject(FLoginUserList);
   if FLoginUserList.Exists(UserID) then
     begin
       OutData.WriteBool(False);
       OutData.WriteString(Format('user already online:%s', [UserID]));
       Exit;
     end;
-  UnLockObject(FLoginUserList);
 
   UserDefineIO := GetUserDefineClient(Sender);
   UserDefineIO.UserFlag := MakeUserFlag;
@@ -241,7 +240,7 @@ begin
   umlCreateDirectory(UserDefineIO.UserPath);
   UserDefineIO.UserDBIntf := FUserDB.VariantList[UserID];
   UserDefineIO.UserDBIntf['UserFlag'] := UserDefineIO.UserFlag;
-  UserDefineIO.UserDBIntf['password'] := GeneratePassword(TCipherStyle.csDES64, UserPasswd).Text;
+  UserDefineIO.UserDBIntf['password'] := GenerateQuantumCryptographyPassword(UserPasswd).Text;
   UserDefineIO.UserAuthService := Self;
   UserDefineIO.LoginSuccessed := True;
 
@@ -256,9 +255,7 @@ begin
   if FCanSaveUserInfo then
       FUserDB.SaveToFile(umlCombineFileName(FRootPath, 'UserDB'));
 
-  LockObject(FLoginUserList);
   FLoginUserList[UserID] := Now;
-  UnLockObject(FLoginUserList);
 end;
 
 constructor TCommunicationFramework_UserAuthService.Create(ACommunication: TCommunicationFramework);
@@ -293,7 +290,7 @@ end;
 
 procedure TCommunicationFramework_UserAuthService.SwitchServiceAsMaxSafe;
 begin
-  Communication.SwitchMaxSafe;
+  Communication.SwitchMaxSecurity;
 end;
 
 procedure TCommunicationFramework_UserAuthService.SwitchServiceAsDefaultPerformance;
@@ -303,45 +300,43 @@ end;
 
 procedure TCommunicationFramework_UserAuthService.Progress;
 begin
-  Communication.ProgressBackground;
+  Communication.Progress;
 end;
 
 procedure TCommunicationFramework_UserAuthService.RegisterCommand;
 begin
   Communication.PeerClientUserDefineClass := TPeerClientUserDefineForIO;
 
-  {$IFDEF FPC}
-  Communication.RegisterStream('UserLogin').OnExecute := @Command_UserLogin;
-  Communication.RegisterStream('RegisterUser').OnExecute := @Command_RegisterUser;
-  {$ELSE}
-  Communication.RegisterStream('UserLogin').OnExecute := Command_UserLogin;
-  Communication.RegisterStream('RegisterUser').OnExecute := Command_RegisterUser;
-  {$ENDIF}
+{$IFDEF FPC}
+  Communication.RegisterStream(C_UserLogin).OnExecute := @Command_UserLogin;
+  Communication.RegisterStream(C_RegisterUser).OnExecute := @Command_RegisterUser;
+{$ELSE}
+  Communication.RegisterStream(C_UserLogin).OnExecute := Command_UserLogin;
+  Communication.RegisterStream(C_RegisterUser).OnExecute := Command_RegisterUser;
+{$ENDIF}
 end;
 
 procedure TCommunicationFramework_UserAuthService.UnRegisterCommand;
 begin
-  Communication.DeleteRegistedCMD('UserLogin');
-  Communication.DeleteRegistedCMD('RegisterUser');
+  Communication.DeleteRegistedCMD(C_UserLogin);
+  Communication.DeleteRegistedCMD(C_RegisterUser);
   Communication.PeerClientUserDefineClass := TPeerClientUserDefine;
 end;
 
-function TCommunicationFramework_UserAuthService.MakeUserFlag: string;
-label goLoop;
+function TCommunicationFramework_UserAuthService.MakeUserFlag: SystemString;
 var
   d: Double;
-  p: PInteger;
+  p: PInt64;
 begin
-goLoop:
-  TCoreClassThread.Sleep(1);
-  d := Now;
-  p := @d;
-  Result := IntToHex(p^, 8);
-  if umlDirectoryExists(umlCombinePath(FRootPath, Result)) then
-      goto goLoop;
+  repeat
+    TCoreClassThread.Sleep(1);
+    d := Now;
+    p := @d;
+    Result := IntToHex(p^, 16);
+  until not umlDirectoryExists(umlCombinePath(FRootPath, Result));
 end;
 
-function TCommunicationFramework_UserAuthService.GetUserDefineClient(cli: TPeerClient): TPeerClientUserDefineForIO;
+function TCommunicationFramework_UserAuthService.GetUserDefineClient(cli: TPeerIO): TPeerClientUserDefineForIO;
 begin
   Result := cli.UserDefine as TPeerClientUserDefineForIO;
 end;
@@ -365,7 +360,7 @@ end;
 
 procedure TCommunicationFramework_UserAuthClient.SwitchServiceAsMaxSafe;
 begin
-  Client.SwitchMaxSafe;
+  Client.SwitchMaxSecurity;
 end;
 
 procedure TCommunicationFramework_UserAuthClient.SwitchServiceAsDefaultPerformance;
@@ -375,7 +370,7 @@ end;
 
 procedure TCommunicationFramework_UserAuthClient.Progress;
 begin
-  Client.ProgressBackground;
+  Client.Progress;
 end;
 
 procedure TCommunicationFramework_UserAuthClient.RegisterCommand;
@@ -386,7 +381,7 @@ procedure TCommunicationFramework_UserAuthClient.UnRegisterCommand;
 begin
 end;
 
-function TCommunicationFramework_UserAuthClient.UserLogin(UserID, Passwd: string): Boolean;
+function TCommunicationFramework_UserAuthClient.UserLogin(UserID, passwd: SystemString): Boolean;
 var
   sendDE, resDE: TDataFrameEngine;
 begin
@@ -395,8 +390,8 @@ begin
   resDE := TDataFrameEngine.Create;
 
   sendDE.WriteString(UserID);
-  sendDE.WriteString(Passwd);
-  Client.WaitSendStreamCmd('UserLogin', sendDE, resDE, 10000);
+  sendDE.WriteString(passwd);
+  Client.WaitSendStreamCmd(C_UserLogin, sendDE, resDE, 10000);
 
   if resDE.Count > 0 then
     begin
@@ -408,7 +403,7 @@ begin
   DisposeObject(resDE);
 end;
 
-function TCommunicationFramework_UserAuthClient.RegisterUser(UserID, Passwd: string): Boolean;
+function TCommunicationFramework_UserAuthClient.RegisterUser(UserID, passwd: SystemString): Boolean;
 var
   sendDE, resDE: TDataFrameEngine;
 begin
@@ -417,8 +412,8 @@ begin
   resDE := TDataFrameEngine.Create;
 
   sendDE.WriteString(UserID);
-  sendDE.WriteString(Passwd);
-  Client.WaitSendStreamCmd('RegisterUser', sendDE, resDE, 10000);
+  sendDE.WriteString(passwd);
+  Client.WaitSendStreamCmd(C_RegisterUser, sendDE, resDE, 10000);
 
   if resDE.Count > 0 then
     begin
